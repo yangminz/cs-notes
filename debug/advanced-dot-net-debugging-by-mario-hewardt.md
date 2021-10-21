@@ -6,6 +6,7 @@ Windows heap manager
 most allocate/free requests in segments(large chunk). maintaining look aside & free lists.
 
 CLR heap manager
+
 managed process
 
 diff: DS & algorithm to maintain the **Integrity** of the heap.
@@ -26,10 +27,10 @@ not all memory in segment is committed. **commite on demand**
 > !address <virtual address>
 ```
 
-type: 
-protect: page protect level: R/W
-state: if committed or not
-usage: 
+-   type: 
+-   protect: page protect level: R/W
+-   state: if committed or not
+-   usage: 
 
 ## Allocating Memory
 
@@ -126,9 +127,11 @@ force GC by calling API: `GC.Collect`
 Segment & Generation
 
 Seg 0 (Ephemeral Seg, targeting the short-lived objects):
+
 {Gen 0, Gen 1, Gen 2(maybe)}
 
 Seg 2 (Extended Seg)
+
 {Gen 2 only}
 
 ```
@@ -210,6 +213,58 @@ pin the object to its address, do not move until released. For GC, fragmentation
 
 ## Debugging Managed Heap Corruptions
 
+corruption: violation of the integrity of the heap.
+
+Bad news: corruption rarely breaks at the point of corruption. usually later.
+
+Best situation: crash happens close th the source of corruption, then no need to do historic back tracking.
+
+What causes a heap corruption to occur? The common cause: not properly managing the memory the app owns:
+
+-   reuse after free (CLR handled: no root)
+-   dangling pointers (not easily achieved)
+-   buffer overruns (trapped as exception)
+
+but when collaborate with native C++ ...
+
+Corruption without native behavior usually indicates bug in CLR itself.
+
+Access Violation
+
+```
+> !VerifyHeap
+```
+
+ATTENTION: `verifyheap` may fail when doing GC.
+
+## Debugging Managed Heap Fragmentation
+
+Problem: `OutOfMemory` Exception due to fragmentation.
+
+Common causes: excessive or prolonged pinning. Dev: Pinning must be short-lived when necessary.
+
+## Debugging Out of Memory Exceptions
+
+Task manager: per-process memory information
+
+-   working set: amount of memory used by the process
+-   commit size: amount of virtual memory committed by the process
+-   paged/nonpaged pool: 
+
+**Windows Reliability and Performance Monitor**
+
+use **Performance counters**, trace log, configuration information as data sources.
+
+```
+.Net CLR Memory perf counter
+    # total bytes counter
+    # total committed bytes counter
+```
+
+loader usage increasing: a possible assembly leak.
+
+For non-live postmoterm debugging, no cookbook. Use `eeheap`, `dumpheap`, `dumpdomain` to collect clues.
 
 
+# Chapter 6. Synchronization
 
