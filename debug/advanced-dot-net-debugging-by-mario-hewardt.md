@@ -268,3 +268,44 @@ For non-live postmoterm debugging, no cookbook. Use `eeheap`, `dumpheap`, `dumpd
 
 # Chapter 6. Synchronization
 
+## Synchronization Basics
+
+Windows: **Preemptive** and **Multithreaded** OS.
+
+Multithreaded: run any number of threads concurrently. Single processor: use time quantum and do context switch. Multiple processors: per processor.
+
+Preemptive: any thread can yield control of processor to another thread at any time.
+
+Problem: Dependent multithreading: 2+ threads work together.
+
+## Thread Synchronization Primitives
+
+Windows: Thread Execution Block (TEB): id, last error, local storage, etc.
+
+CLR: Thread
+
+```
+> !threads
+```
+
+The data structure
+
+```
+class Thread
+{
+    /// alive, aborted, etc - bit mask
+    volatile ThreadState m_State;
+
+    /// # locks currently held by the thread
+    DWORD m_dwLockCount;
+
+    /// managed id
+    DWORD m_ThreadId;
+
+    /// reader/writer lock state
+    LockEntry *m_pHead;
+
+    /// reader/writer lock state
+    LockEntry m_embeddedEntry;
+}
+```
