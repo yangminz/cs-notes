@@ -309,3 +309,113 @@ class Thread
     LockEntry m_embeddedEntry;
 }
 ```
+
+No tool to inspect the fields. Need to calculate the bytes offset by hand.
+
+## Events
+
+Event: kernel mode primitive, synchronization object: signaled or nonsignaled. Sync code flow execution between mutiple threads. E.g. `ReadFile` event. T0 call event, T1 (maybe hardware driver) do the thread, T0 do other work, T1 notifies the finish, T0 wait for the signal, T0 resumes continuation.
+
+Nonsignaled --> Signaled: a event occurred. *A Thread* waiting the event is awaken and allowed to continue execution.
+
+Event objects: mannual reset & auto reset. Suppose n threads are waiting for one event.
+
+-   mannual reset: event object is still in signaled state. When explicitly reset, turn to nonsignaled. m(m <= n) threads can be released.
+-   auto reset: one thread is released (no longer waiting) before automatically reset to the nonsignaled state. If no threads waiting, remains signaled until first thread tries to wait for the event.
+
+`System.Threading.Event`: wrapper over underlying Windows kernel object. Use `handle` command.
+
+## Mutex
+
+Mutex: kernel mode synchronization constrcut to sync threads: threads within one process & threads across processes.
+
+`System.Threading.Mutex`. still a wrapper of kernel.
+
+## Semaphore
+
+Synchronization object accessible from user mode: exclusive access. Semaphores use **Resource counting**, so X number of threads can access to the resource. E.g. 4 USB ports access to one resource. 4 threads.
+
+## Monitor
+
+`System.Threading.Monitor`: Construct monitoring access to an object and creating a lock on it. **Not** a wrapper for kernel primitives.
+
+```
+Monitor.Enter(db1);
+// exclusive logic
+Monitor.Exit(db1);
+
+lock(object)
+{
+    // exclusive logic
+}
+```
+
+`lock` grammar sugar for monitor. Locked object keeps the information in the memory layout to maintain the integrity of the lock.
+
+Stateless.
+
+## ReaderWriterLock (Slim)
+
+Readers > Writers: poor perf because lock is heavily contended. `System.Threading.ReaderWriterLock`: multiple read, one write.
+
+Event handle `_hWriterEvent`, `_hReaderEvent` to give access control to reader and writer queue. State `_dwState`: the internal states of the lock: reader, writer, waiting reader, waiting writer, etc.
+
+`System.Threading.ReaderWriterLock` perf is poor, but correct. `System.Threading.ReaderWriterLockSlim` improve perf.
+
+## Thread Pool
+
+Do not construct and destruct `System.Threading.Thread` for each HTTP request. Use `System.Threading.ThreadPool` managed by the runtime. Default number 250. Min number: number of processors.
+
+```
+> !threadpool
+```
+
+## Synchronization Internals
+
+### Object Header
+
+Sync block is stored in non GC memory and accessed by index into sync block table. Object header stores the pointer (table index).
+
+The header can be pointer or data. If data is too large to fit in the header, turn it to pointer to sync block table. Difference is the high bits. E.g. `0x0f78734a` is information, `0x0800001` is index `[1]`. If `0x08000000` is `1`, a sync block index. If `0x04000000`, a hash code.
+
+### Sync Blocks
+
+`dd` inspecting the bytes of object (object address `-4`) to get the sync information.
+
+```
+> !syncblk <sync block index>
+```
+
+### Thin Locks
+
+In thin lock, the header stores only thread id of acquiring thread, no sync block. CLR **infers** that there is a simple spinning lock. If spinning is not finished in short time, create a sync block do wait in ready queue.
+
+## Synchronization Scenarios
+
+### Basic Deadlock
+
+Mutally locked, CPU no execution but only thread switches. 
+
+Task: find the address that different threads are waiting on.
+
+Method 1
+
+T0 `clrstack` to check. If `System.Threading.Monitor.Enter` is in call stack, T0 is trying to acquire a lock. Use `%rip` to find the code and check whick lock is getting acquired.
+
+`syncblk` to check the sync block in object header of the lock address. Find T1 is holding the lock. Check the call stack of T1. Do the same to further investigation.
+
+Method 2
+
+deadlock detection tool:
+
+```
+> !dlk
+```
+
+`dlk` does not work with thin locks. Need to debug mannually.
+
+## Orphaned Lock Exceptions
+
+## Thread Abortion
+
+`Thread.Abort` making lock not properly released.
