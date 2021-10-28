@@ -1,3 +1,5 @@
+By Hal Abelson, Jerry Sussman and Julie Sussman
+
 # Chapter 5. Computing with Register Machines
 
 ## 5.3 Storage Allocation and Garbage Collection

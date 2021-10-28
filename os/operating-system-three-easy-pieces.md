@@ -1,3 +1,5 @@
+By Remzi H. Arpaci-Dusseau and Andrea C. Arpaci-Dusseau
+
 # Chapter 26. Concurrency and Threads
 
 # Chapter 28. Locks

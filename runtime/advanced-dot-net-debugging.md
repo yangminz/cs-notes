@@ -1,3 +1,5 @@
+By Mario Hewardt
+
 # Chapter 5. Managed Heap and Garbage Collection
 
 ## Windows Memory Architecture Overview
