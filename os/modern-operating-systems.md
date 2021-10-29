@@ -1,0 +1,360 @@
+4th edition By Andrew S. Tanenbaum and Herbert Bos
+
+# Chapter 2. Processes and Threads
+
+Process: abstraction provided by OS. pseudo concurrent operation even only 1 CPU core (`%rip`).
+
+## 2.1 Processes
+
+multiprogramming system: CPU switches from process to process, running for *10 or *100 ms.
+
+sequential process: conceptual model to think parallelism
+
+### 2.1.1 The Process Model
+
+Process: instance of executing programe: program counter, registers, variables. Each process has its own virtual CPU.
+
+Critical real-time requirements.
+
+### 2.1.2 Process Creation
+
+events cause processes to be created:
+
+1.  System initialization: when booted, several processes: foreground, background (**daemons**).
+2.  Running processes created (`fork`)
+
+A new process is created by having an existing process execute a creation syscall. `fork`
+
+`fork`: exact clone of the calling process. parent & child have the same memory image, same environment strings, same open files.
+
+`execve` change memory image and run a new program. allow child to manipulate its file descriptors after `fork` but before `execve`: redirection of standard I/O/E.
+
+Windows `CreateProcess`: creation process and loading program file at the same time.
+
+copy-on-write: create 2 distinct address spaces. some may share the `.text` section. Windows: different from the start.
+
+### 2.1.3 Process Termination
+
+1.  Normal exit (voluntary)
+2.  Error exit (voluntary)
+3.  Fatal error (involuntary) - self handle: signaled (interrupt) instead of terminated
+4.  Killed by another process (involuntary) `kill` and `TerminateProcess`: how to handle the orphans
+
+### 2.1.4 Process Hierarchies
+
+parent - child
+
+a process & all descendants ==> process group. each process can catch signal, ignore signal, take default action (be killed by the signal)
+
+`init` - in boot image. on start: detect num of terminals from a file. Then fork `shell` for each terminal, waiting login. `init` the root (process id 1)
+
+Windows: **no process hierarcy**. parent gets a handle to control the child. the handle can point to any other process.
+
+### 2.1.5 Process States
+
+process blocked, cannot continue, typically waiting for something like input.
+
+1.  Running (actually using the CPU at that instant).
+2.  Ready (runnable; temporarily stopped to let another process run). like running, but no CPU resource for the process.
+3.  Blocked (unable to run until some external event happens).
+
+-   Running -> Blocked: When process cannot continue. e.g. `pause()` syscall; read from file and input not ready, automatically blocked.
+-   Running -> Ready: schedule to give up due to time slice
+-   Ready -> Running: schedule to run due to time slice
+-   Blocked -> Ready: external event waited happens.
+
+Each process is a state machine. Consider C# `async` and `await` creates a state machine.
+
+
+### 2.1.6 Implementation of Process
+
+OS: process table, entry: process control block, PCB.
+
+PCB: program counter, stack pointer, memory alloation, files, necessary information to switch between Runnning, Ready, Blocked.
+
+Associated with each I/O class is a location (typically at a fixed location near the bottom of memory) called the **interrupt vector**. It contains the address of the interrupt service procedure.
+
+context pushed onto the current stack by the interrupt hardware. program counter then jumps to the address in interrupt vector. -- hardware's work. Then software
+
+Interrupt:
+1.  saving the registers to PCB
+2.  Remove info on stack pushed by interrupt
+3.  set stack pointer to a temporary stack used by process handler - assembly not C
+4.  C procedure: for the interrupt. do job.
+5.  scheduler called to run next.
+6.  control passed back to assembly code to load up registers and memory map for the scheduled process.
+
+after each interrupt the interrupted process returns to precisely the same state it was in before the interrupt occurred.
+
+## 2.2 Threads
+
+multiple threads in same address space running in quasi-parallel.
+
+### 2.2.1 Thread Usage
+
+why: multiple activities are going on at once.
+
+share address space and data among themselves
+
+thread: light and faster
+
+### 2.2.2 The Classical Thread Model
+
+process model: resource grouping & execution
+
+resource grouping: the address space, etc.
+
+execution: thread: registers, program counter, stack, etc. 
+
+# Chapter 10. Case Study 1: Unix, Linux, and Android
+
+## 10.3 Process in Linux
+
+### 10.3.1 Fundamental Concepts
+
+Each process runs a single program and initially has a single thread of control - only one program counter = the next instruction.
+
+`fork` syscall creates exact copy of the parent process. They have their own private memory images. COW
+
+open files are shared between parent and child. change to file is visible between the 2 processes.
+
+`fork` return: 0 for child and child's pid for parent. implemented by setting `%rax` register.
+
+Process communication: messge passing. e.g. create channels namedpipes.
+
+```
+sort < f | head
+```
+
+process send **signal** to another process. user-handled signals or default behavior (mostly killed by signal)
+
+### 10.3.2 Process-Management System Calls in Linux
+
+parent `waitpid` for the child to finish - just waits until the child terminiates (any child if more than one exists).
+
+`execve` - most complex system call
+
+`exit` - error conditions. parent waiting will be awaken.
+
+Porcess exits and parent has not yet waited for it, the process become **zombie**, the living dead. adopted by `init`.
+
+several syscalls are related to signals. 
+
+### 10.3.3 Implementation of Processes and Threads in Linux
+
+each process: user part that runs the user program. when do a syscall, traps to kernel mode and run kernel context, with a different memory map and full access to all machine resources. **Still the same thread, but more power, its own kernel mode stack and kernel mode program counter**.
+
+`task_struct`: any execution context. `task_struct` is resident in memory at all times, pinned, not swappable. *It's possible for a process to be sent a signal when it's swapped out, it's not possible for it to read a file.* So information about signals must be in memory all the time.
+
+1.  **Scheduling parameters**. Process priority, amount of CPU time consumed recently, amount of time spent sleeping recently. Together, these are used to determine which process to run next.
+2.  **Memory image**. Pointers to the text, data, and stack segments, or page tables. If the text segment is shared, the text pointer points to the shared text table. When the process is not in memory, information about how to find its parts on disk is here too.
+3.  **Signals**. Masks showing which signals are being ignored, which are being caught, which are being temporarily blocked, and which are in the process of being delivered.
+4.  **Machine registers**. When a trap to the kernel occurs, the machine registers (including the floating-point ones, if used) are saved here.
+5.  **System call state**. Information about the current system call, including the parameters, and results.
+6.  **File descriptor table**. When a system call involving a file descriptor is invoked, the file descriptor is used as an index into this table to locate the in-core data structure (i-node) corresponding to this file.
+7.  **Accounting**. Pointer to a table that keeps track of the user and system CPU time used by the process. Some systems also maintain limits here on the amount of CPU time a process may use, the maximum size of its stack, the number of page frames it may consume, and other items.
+8.  **Kernel stack**. A fixed stack for use by the kernel part of the process.
+9.  **Miscellaneous**. Current process state, event being waited for, if any, time until alarm clock goes off, PID, PID of the parent process, and user and group identification.
+
+When `fork`:
+
+1.  malloc new `task_struct` and `mm_struct` for child, new PID, `thread_info` (fixed offset from the process's end-of-stack)
+2.  child set up memory map, shared access to parent's files, registers
+3.  store `task_struct` at a fixed location
+
+copying memory is expensive: COW. **Protection Fault** instead of page fault.
+
+
+
+
+
+## 10.4 Memory Management in Linux
+
+barely changed in history.
+
+### 10.4.1 Fundamental Concepts
+
+Text, data, bss segment. 1950s, self-update text. too complex, then read-only.
+
+bss, uninitialized data, actually just an optimization.
+
+Linux: static **zero page**, write-protected page full of zeros. When write, copy-on-write.
+
+shared text segments. data and stack are not shared except after a fork. 
+
+Access file data through **memory-mapped files**. map a file onto a portion of process's address space so the file can be r/w as byte array in memory. makes the random access to file easier than I/O syscalls `read` & `write`. Shared libraries are accessed in this way.
+
+2 processes map the same file, write to file is visible to the others: multiple processes sharing memory. 
+
+### 10.4.2 Memory Management System Calls in Linux
+
+```
+brk()
+mmap()
+unmap()
+```
+
+### 10.4.3 Implementation of Memory Management in Linux
+
+64-bit X86 machine: 48 bits for addressing: kernel space and user space. *address space is created when the process is created and is overwritten on an `exec` syscall.*
+
+#### Physical Memory Management
+
+not all physical memory can be treated identically, especially with respect to I/O and virtual memory. (UMA vs NUMA? different memory controllers)
+
+1.  `ZONE_DMA` and `ZONE_DMA32`: physical pages used for DMA
+2.  `ZONE_NORMAL`: normal and regularly mapped pages
+3.  `ZONE_HIGHMEM`: pages with high-memory address, not permantly mapped
+
+above zones are architecture dependent.
+
+Kernel and memory map are pinned in memory, never paged out. the rest are divided into page frames, each containing text, data, stack, page table, or free list. 
+
+Linux maintains array of page descriptors: each descriptor `page` for each physical page frame. The array: `mem_map`.
+
+```
+// physical page descriptor
+typedef struct page
+{
+    // the address space this page belongs to
+    struct address_space *mapping;
+
+    // doubly-linked list pointers
+    // if this page is free
+    // linked with other descriptors as free list
+    struct page *prev;
+    struct page *next;
+} mem_map_t;
+
+// 1/128 of physical memory
+mem_map_t mem_map[NUM_PHYSICAL_PAGES];
+
+// Zone descriptor
+typedef struct zone_struct
+{
+    // Free area bitmaps used by the buddy allocator
+    free_area_t free_area[MAX_ORDER];
+} zone_t;
+
+// Node descriptor
+typedef struct pglist_data
+{
+    // zones for this node, ZONE_HIGHMEM, etc
+    zone_t node_zones[MAX_NR_ZONES];
+
+    // first page of struct page array representing each physical frame in the node.
+    // it's placed somewhere within global mem_map array.
+    struct page *node_mem_map;
+} pg_data_t;
+```
+
+`sizeof(page) == 32 Bytes`. So 32Bytes / 4KB = 1/128 of whole physical memory is used for management.
+
+physical memory = zones, so a zone descriptor: memory utilization within each zone, e.g. active or inactive, etc.
+
+?
+
+zone descriptor: array of free areas. `free_area[i]` identifies the first page descriptor of the first block of 2^i free pages. E.g. `free_area[0]`, for all free areas of memory, area size is 1 (2^0) page, points to `free_area[i]`.
+
+NUMA: different address have different access time. node descriptor. **UMA: describe all memory via one node descriptor.**
+
+4-level paging
+
+kernel itself is fully haredwired: no part of it is ever paged out. The rest, user pages, paging cache, and other.
+
+page cache: pages containing file blocks recently read, pages of file blocks swapped out, etc. not a real cache, but a set of user pages no longer needed and waiting to be paged out.
+
+#### Memory-Allocation Mechanisms
+
+Page allocator: buddy algorithm
+
+Initially, e.g. 64 pages as a whole. request, split into 2^i: request 4 pages, do splitting: 64 = 32 + 16 + 8 + 4 + 4, one of 4 pages are allocated.
+
+Internal fragmentation: request 65 pages, get 128 pages. To alleviate, **slab allocator**: request through buddy, but split into slabs (smaller units) and manage the smaller units separately.
+
+object cache based on allocated type. type-based cache.
+
+```
+typedef struct
+{
+    slab_t *slab;
+} object_cache_t;
+```
+
+E.g. allocate a new `task_struct`:
+
+1.  Find a partially full slab and allocate, return
+2.  Looks through the list of empty slabs, return
+3.  Allocate a new slab, link this slab with `task_struct` object cache, return
+
+#### Virtual Address-Space Representation
+
+virtual address space is divided into areas. each area: consecutive virtual pages with same page properties, e.g. r/w level. can have holes between the areas. 
+
+fatal page fault: reference to hole results
+
+```
+typedef struct
+{
+    /* 
+        protection mode, RO or RW
+        if pinned in memory: pageable or not
+        direction growing: stack to low address, heap to high address
+        private to process or shared
+        if there is backing storage on disk: if so (.text), there is. If not (stack), back when swapped out.
+     */
+} vm_area_struct
+```
+
+list + balaced tree to support area searching.
+
+Fork and COW: after `fork`
+
+-   vm areas list: child copied from parent. the areas are marked as R/W
+-   page tables: child share the same page table with parent. The pages are RO.
+
+Parent/child tries to write, **Protection Fault** (Not page fault) occurs. Kernel found: area is writable, but page is not. So copy the page and mark it as R/W.
+
+Top level memory descriptor `mm_struct`:
+
+-   information of all virtual memory areas belonging to address space
+-   information about segments: text, data, stack
+-   information about user sharing
+
+### 10.4.4 Paging in Linux
+
+swapper process: move pages betweej memory adn disk. **Page Frame Reclaiming Algorithm**.
+
+-   Process 0 - idle, or named as swapper
+-   Process 1 - init
+-   Process 2 - page daemon
+
+Pid2 page daemon runs periodically. one awake, check if needs to do swapping.
+
+Linux: demand-paged. No prepaging, no working-set. 
+
+text, mapped files are paged to files on disk. Other anonymous pages are swapped to swap area. Paging files can be added or removed dynamically and each one as a **priority**. raw device is more efficient.
+
+#### The Page Replacement Algorithm
+
+PFRA - Page Frame Reclaiming Algorithm
+
+page types:
+
+1.  unreclaimable - reserved or locked pages, kernel mode stacks, not paged out
+2.  swappable - dirty: must be written back to swap area or paging disk partition before reclaimed
+3.  syncable - if dirty, must be written back to disk
+4.  discardable - can be reclaimed immediately
+
+If memory is low, page daemon `kswapd` run PFRA. for each run, a certain target number of pages is reclaimed, typically <= 32. 
+
+reclaim priority:
+
+1.  discardable - clean or readonly, etc
+2.  backed but not referenced recently - LRU
+
+clock-like algorithm: LRU
+
+
+
+
