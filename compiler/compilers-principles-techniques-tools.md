@@ -1,4 +1,4 @@
-By Alfred V.Aho & J.D.Ullman
+2nd Edition By Alfred V.Aho & J.D.Ullman
 
 # Chapter 7. Run-Time Environments
 

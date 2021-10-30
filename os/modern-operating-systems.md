@@ -106,6 +106,20 @@ resource grouping: the address space, etc.
 
 execution: thread: registers, program counter, stack, etc. 
 
+# Chapter 3. Memory Management
+
+## 3.5 Design Issues for Paging Systems
+
+### 3.5.7 Mapped Files
+
+shared lib: a special case of memory-mapped files. **syscall to map a file onto a portion of its virtual address space**. In implementations, when mapping, no pages are in memory (so the page table only records the mapping to disk offset? how do I distinguish swap space & normaly file since they are not encoded in the same way???). when the page is referenced, allocate as demand paging.
+
+provide an alternative model for I/O: **files can be accessed as a big byte array in memory**.
+
+
+
+
+
 # Chapter 10. Case Study 1: Unix, Linux, and Android
 
 ## 10.3 Process in Linux
@@ -164,7 +178,45 @@ When `fork`:
 
 copying memory is expensive: COW. **Protection Fault** instead of page fault.
 
+child running, do `exec` syscall, locate, verify, load assembly, *release the old address space and page table*.
 
+Then create new address space. Set up new page tables: only one stack page. **But address space is backed by assembly on disk** when the new process run, immediately get a **page fault**, caused by *the first page of text code from assembly (rip)*. Nothing needed to be loaded in advance. (? so assembly memory mapping is?: assembly loaded from disk to main memory pages, but no page table mapping?)
+
+Finally, arguments & environment strings copied to the new stack, signals reset (cleared), registers initialized to zeros (unrelated, of course we need rip & rsp). then execute the first assembly instruction.
+
+Fork:
+
+```
+Allocate child’s task structure
+Fill child’s task structure from parent
+Allocate child’s stack and user area
+Fill child’s user area from parent
+Allocate PID for child
+Set up child to share parent’s text
+Copy page tables for data and stack
+Set up sharing of open files
+Copy parent’s registers to child
+```
+
+Exec
+
+```
+Find the executable program
+Verify the execute permission
+Read and verify the header
+Copy arguments, environ to kernel
+Free the old address space
+Allocate new address space
+Copy arguments, environ to stack
+Reset signals
+Initialize registers
+```
+
+#### Threads in Linux
+
+Historically, processes were resource containers and threads were the units of execution.
+
+Classically, when a new thread was created, the original thread(s) and the new one shared everything but their registers. Linux `clone` fine-grained resource sharing by bit map flags.
 
 
 

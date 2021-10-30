@@ -1,4 +1,4 @@
-By Hal Abelson, Jerry Sussman and Julie Sussman
+2nd Edition By Hal Abelson, Jerry Sussman and Julie Sussman
 
 # Chapter 5. Computing with Register Machines
 
