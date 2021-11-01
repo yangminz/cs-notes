@@ -183,7 +183,46 @@ store the registers flags, registers, PC to kernel stack. and restore the contex
 
 # Chapter 8. Memory Management
 
+## 8.3 Noncontiguous Memory Area Management
+
+### Allocating a Noncontiguous Memory Area
+
+Input: a fresh interval of contiguous linear address, a group of noncontiguous page frames has been allocated
+
+Map the contiguous linear address to the maybe-discrete physical page frames. Update the page tables to do the mapping. `map_vm_area`
+
+1.  require a spin lock for `init_mm->pgd`
+2.  Then create new PUD, PMD, PTE covering the addresses
+
 # Chapter 9. Process Address Space
+
+## 9.1 The Process's Address Space
+
+Address space: all linear addresses that the process is allowed to use. The intervals of linear addresses: *memory regions*. 
+
+## 9.2 The Memory Descriptor
+
+All information about address space is in `task_struct->mm_struct`. All `mm_struct` are stored in doubly linked list `mmlist`. protected by a spin lock against concurrent access. Reference counting: when `mm_count` decreased, kernel check if it's zero, then deallocate when not in use. 
+
+### Memory Descriptor of Kernel Threads
+
+Kernel thread does not access linear address below `0xc0000000`. So kernel thread do not use memory regions, and will not use most fields of `mm_struct`.
+
+**The page table entries above `0xc0000000` should be the same for all processes**, so kernel thread can use the page tables of the last previously running regular process: `mm` - owned by the process; `active_mm` used by the process when in execution. For regular process, `mm == active_mm`; For kernel threads, `mm == NULL, active_mm = last active_mm`. 
+
+(So when process traps to kernel, rip moves to kernel .text by trap handler, `mm` becomes NULL, `active_mm` does not change, `active_mm->pgd` are in 2 halves: half high is kernel pgd entries, points to kernel pud, pmd, pte, half low is user process pgd entries, private to the process. And all processes share the same high half of pgd. kernel PGD have multiple copies, but kernel PUD, PMD, PTE are identical in the whole memory.)
+
+When kernel process updates page table entry in high space, it should update the correspoinding entry in all processes' page tables. It's costy operation, therefore use deferred approach: when high address remapped, update a canonical set of page tables rooted at `swapper_pg_dir` master kernel PGD: `init_mm->pgd`.
+
+## 9.4 Page Fault Exception Handler
+
+### Handling Noncontiguous Memory Area Accesses
+
+Kernel is lazy in updating page table entries for noncontiguous memory areas. `vmalloc()` and `vfree()` limit themselves in updating master kernel page tables (`init_mm.pgd` and its child tables).
+
+Master kernel page tables are not directly used by any user process or kernel thread. When process in kernel mode first access a noncontiguous memory area address, MMU encounters a null page table entry, raises a page fault. _The handler finds this address is kernel address, then check master kernel page table entry._
+
+If master kernel page table entry is null, goto `no_context` and hanldling this address as outside the address space (note that kernel thread is not having address space, this address space is not the regular process's address space). Else, 
 
 # Chapter 10. System Calls
 
