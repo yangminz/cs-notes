@@ -1,4 +1,4 @@
-By Russ Cox, Frans Kaashoek, Robert Morris
+2017 Edition By Russ Cox, Frans Kaashoek, Robert Morris
 
 # Chapter 0. Operating System Interfaces
 
@@ -190,7 +190,6 @@ The first user process `initcode.S` compile its user-space memory in assembly. T
 Then `userinit` sets up the trap frame with initial user mode state: `%cs, %ds, %es, %ss, %eflags` registers. `%esp` is the max virtual address (no random); `%eip` is `0` lowest virtual address (like `0x00400000` in x86-64, .text entry point).
 
 ```C
-
   memset(p->tf, 0, sizeof(*p->tf));
   p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
   p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
@@ -200,3 +199,13 @@ Then `userinit` sets up the trap frame with initial user mode state: `%cs, %ds, 
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
 ```
+
+## Code: Running the First Process
+
+`scheduler` looks for a process `RUNNABLE`, there is only one: `initproc`. `proc` is the per-CPU variable (one CPU can run only one process), set it as `initproc`. Call `switchuvm` to tell the hardware to start using the target process's page table. Also set up the task state segment `SEG_TSS` that instructs the hardware to execute syscalls and interrupts on the process's kernel stack.
+
+`scheduler` then call `swtch` to do context switch to the target process's kernel thread:
+
+1.  Save the current registers. But current context is not a process, it's scheduler. So the hardware registers are stored in `cpu->scheduler`, instead of the kernel thread context. 
+2.  `swtch` then loads the saved registers of the target kernel thread (`p->context`) into X86 hardware registers, including `%esp, %eip`
+3.  Finally, `ret` pops the target process's `%eip` from stack, finish context switching. Now CPU is running on the kernel stack of process `p`.
