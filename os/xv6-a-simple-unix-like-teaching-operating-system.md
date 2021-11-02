@@ -118,6 +118,7 @@ With this free proc slot in _process table_, `allocproc` will set up the new pro
 
 ```
 +-----------+ <=== top of new stack // 1
+|   esp     |
 +-----------+
 |   ...     |
 +-----------+
@@ -209,3 +210,312 @@ Then `userinit` sets up the trap frame with initial user mode state: `%cs, %ds, 
 1.  Save the current registers. But current context is not a process, it's scheduler. So the hardware registers are stored in `cpu->scheduler`, instead of the kernel thread context. 
 2.  `swtch` then loads the saved registers of the target kernel thread (`p->context`) into X86 hardware registers, including `%esp, %eip`
 3.  Finally, `ret` pops the target process's `%eip` from stack, finish context switching. Now CPU is running on the kernel stack of process `p`.
+
+`ret` starts executing `forkret`.
+
+`trapret` starts executing, `%esp` set to `p->tf`.
+
+Finally, `%eip = 0 && %esp = 4096`, the virtual adresses in the process's address space. Set up the page tables so the process is constrained to use its own memory.
+
+## The First System Call: `exec`
+
+User level process re-enters the kernel -- trap.
+
+```
+  movl $SYS_exec, %eax
+  int $T_SYSCALL
+```
+
+`exec` replaces memory, registers, but file descriptors, process id, parent process unchanged.
+
+
+## Real World
+
+A real OS will find `proc` with an explicit free list in constant time instead of linear-time search. Another problem: address space layout cannot make use of RAM > 2GB.
+
+# Chapter 2. Page Tables
+
+OS uses page tables to control memory address. Multiplex the address spaces of different processes onto a single physical memory, and to protect the memories of different processes. Page table tricks:
+
+1.  Mapping the same memory (the kernel) in several address spaces
+2.  Mapping the same memory more than once in one address space. Each user page is also mapped into kernel's physical view of memory.
+3.  Guarding a user stack with an unmapped page.
+
+## Paging Hardware
+
+X86 page table: PTE: 20-bit PPN/PFN and some flags. Use high 20 bits of PTE to index into page table to find next level PTE. Virtual-to-Physical address translation in page unit.
+
+PTE low 12 control bits:
+
+1.  P - Present
+2.  W - Writable
+3.  U - User
+4.  WT - Write through or write back
+5.  CD - Cache Disabled
+6.  A - Accessed
+7.  D - Dirty
+8.  AVL - Available for system use
+
+## Process Address Space
+
+OS tells page table hardware to switch page tables when OS switches between processes. 
+
+Mappings for kernel: Fixed mapping: `KERNBASE:KERNBASE+PHYSTOP` to `0:PHYSTOP`. So kernel can use its own instructions and data. Sometimes kernel needs to write a given physical page, e.g. when creating pages for page tables. So it's better physical page appear at a predictable virtual address. 
+
+Every process's page table contains mapping for both user space & kernel space: easy switch when trap into kernel during syscalls or interrupts: _No page table switch is needed. In most cases, kernel does not have its own page table, it borrows the page table of last process._
+
+## Code: Creating an Address Space
+
+`kvmalloc` to create & switch to page table in kernel space. `setupkvm`:
+
+1.  Allocate a page to hold page directory
+2.  `mappages` to install the translations that the kernel needs, described in `kmap` array. Including the kernel .text, data, physical memory up to `PHYSTOP`. No user space mapping is installed
+3.  `mappages` installs mappings into a page table for a range of virtual addresses to physical addresses. Call `walkpgdir` to find the PTE for that address, initialize the PTE with PFN, flags.
+4.   
+
+## Physical Memory Allocation
+
+Kernel allocates and frees PFN at run-time for page tables, user space, kernel stacks, pipe buffers. Xv6: `END OF KERNEL:PHYSTOP` for run-time allocation. Tracking the free pages.
+
+-   Allocation: remove a page from the linked list
+-   Free: adding a freed page to the list
+
+**A Bootstrap Problem**: All physical frames must be allocated for the allocator to initialize the free list, but creating a page table with thoese mappings involves allocating **page-table pages**. Xv6 solution: use a separate page allocator during entry, 4MB mapping.
+
+## Code: Physical Memory Allocator
+
+Free list of physical frames free for allocation, each element `struct run`. The allocator stores each free frame's `run` within the frame itself (malloc lab). The free list is protected by a spin lock. 
+
+# Chapter 3. Traps, Interrupts, and Drivers
+
+When control of CPU must be transfered from user process to kernel:
+
+1.  Device signaling, e.g. I/O event happens
+2.  User space illegal, e.g. invalid access
+3.  User process syscall
+
+Challenges:
+
+1.  Processor switches from user mode to kernel mode (and back)
+2.  Kernel and device coordinate their parallel activities
+3.  Kernel needs to understand device's interface
+
+## System Calls, Exceptions, and Interrupts
+
+3 cases to trap to kernel:
+
+1.  Syscall, e.g. `exec`
+2.  Exception, e.g. divide by zero
+3.  Interrupt, e.g. time interrupt or disk I/O interrupt
+
+All these cases, OS do the following:
+
+1.  Save the user process's registers for future transparent resume
+2.  OS be set up for kernel space execution thread
+3.  OS defines the entry point for kernel to start executing
+4.  Kernel should know the details of the event
+5.  User and kernel must be isolated
+
+So OS needs to be aware how hardware handles syscall, exception, and interrupts. In most CPUs, these 3 are handled bby a single hardware mechanism - interrupt handling. Xv6 term: **trap**, a conventional Unix term. X86 term: interrupt. Actually, trap: caused by running process (fault), interrupt: caused by device (disk I/O event).
+
+An interrupt stops CPU's instruction loop, switch to execute a **interrupt handler**. Before handling, CPU saves its registers so that OS can restore them when returns from the interrupt. 
+
+## X86 Protection
+
+X86 4 protection levels: ring 0 (most privileged) and ring 3 (least privileged). OS use 2: ring 0 for kernel mode & ring 3 for user mode. `%cs` register **CPL** field stores the level, Current Privilege Level. DPL - Descriptor Privilege Level for each segment descriptor. RPL - Request Privilege Level, for segment selector. 
+
+X86: interrupt handlers defined by **Interrupt Descriptor Table (IDT)**: 256 entries, each provides `%cs` and `%eip` for handling. `int n` instruction check `IDT[n]`. `int` do the following:
+
+-   Fetch the n’th descriptor from the IDT, where n is the argument of int.
+-   Check that CPL in %cs is <= DPL, where DPL is the privilege level in the descriptor.   
+    -   CPL <= DPL allows forbid `int` calls to inappropriate IDT entries such as device interrupt routines
+    -   User process execute `int`, `IDT[n].cs.DPL == 3`, current descriptor is in user mode
+    -   If user program does not have correct privilege, then result in `int 13`, general protection fault.
+-   Save %esp and %ss in CPU-internal registers, but only if the target segment selector’s PL < CPL.
+-   Load %ss and %esp from a task segment descriptor.
+-   Push %ss.
+-   Push %esp.
+-   Push %eflags.
+-   Push %cs.
+-   Push %eip.
+-   Clear the IF bit in %eflags, but only on an interrupt.
+-   Set %cs and %eip to the values in the descriptor.
+
+Hardware uses the stack specified in TSS, set by kernel. Kernel stack after `int`:
+
+```
++-----------+   \
+|   ss      |   |   only present on privilege change (privilege level in descriptor < CPL)
++-----------+   +   if int does not need privilege-level change (Kernel mode interrupt to Kernel mode),
+|   esp     |   |   no these registers
++-----------+   /
+|   eflags  |
++-----------+
+|   cs      |
++-----------+
+|   eip     |
++-----------+
+|   error c |
++-----------+ <--- esp: grow down: kernel stack used by kernel
+|   EMPTY   |
++-----------+
+```
+
+`iret` return from `int` instruction: pops the saved values from kernel stack, resumes execution at saved `%eip`.
+
+
+## Code: Interrupts
+
+Devices on motherboard can generate interrupts. OS must set up the hardware to handle these itnerrutps. Devices interrupt to tell the kernel that some hardware event has occured, e.g. I/O completion. Interrupts are usually optional in the sense that kernel could instead periodically check (or **poll**) the device hardware to check for new events. But polling would waste CPU time. 
+
+Hardware generated interrupts can happen at any time. E.g. timer: 100 interrupts per second, not swamping CPU.
+
+Early boards have Programmable Interrupt Controller, PIC. CPU needs: 
+
+1.  An interrupt controller to handle the interrupt sent to CPU
+2.  Routing interrupts to processors
+
+2 parts to do this:
+
+1.  I/O system: IO APIC
+2.  CPU local: Local APIC
+
+Xv6 ignores interrupts from PIC and configures IOAPIC and Local APIC.
+
+IO APIC has a table. CPU can edit entries in the table through **memory-mapped I/O**. In initialization, OS maps interrupt i to IRQ i, but disables them all. They are enabled by the device.
+
+Timer chip is inside LAPIC, so each processor can receive timer interrupt independently. LAPIC to periodically generate an interrupt at IRQ_TIMER, which is IRQ 0. The interrupt would be routed to local processor.
+
+Timer interrupts through vector 32 (xv6 IRQ 0), an interrupt gate. Vector 64 is used for syscalls, a trap gate. Interrupt gates clear `IF` so the interrupted processor will be blocked - not receive any other interrupts while handling the current. Then interrupt follows the same code path as syscall & exceptions. Build trap frame.
+
+Timer interrupt do 2 things:
+
+1.  Increase tick
+2.  call `wakeup`
+
+## Real World
+
+Typically devices are slower than CPU, so the hardware uses interrupts to notify the operating system of status changes.
+
+# Chapter 5. Scheduling
+
+Time-sharing transparent to user processes. Each process has the illusion that it has its own virtual processor by multiplexing the hardware resources.
+
+## Multiplexing
+
+Xv6: `sleep` & `wakeup`: process
+
+1.  waits for device to complete
+2.  waits for a child to exit
+3.  waits in `sleep` syscall
+
+Xv6 periodically forces a switch through timer.
+
+Challenges:
+
+1.  How to switch? The standard mechanism
+2.  How to do it transparently? timer interrupt handler to drive context switches
+3.  Many CPUs may switching concurrently, locking is needed to avoid races.
+4.  When process exits, all other resources should be freed, but kernel stack is still in use
+5.  Multiprocessor, the core needs to know which process it is running
+
+Processes need to coordinates among themselves, e.g. parent process wait for one child to exit. Repeatedly checking the desired event: CPU-wasting. Insteand, OS allows process to give up CPU and sleep, waiting for an event. Avoid race condition.
+
+## Code: Context Switching
+
+```
+shell
+    trap/interrupt
+kstack - shell
+    switch
+kstack - scheduler
+    switch
+kstack - cat
+    iret
+cat
+```
+
+2 context switches!! For scheduler to run on its own kstack. 
+
+Each CPU has a separate scheduler thread for use, instead of any process's kernel thread. _`%esp, %eip` are saved and restored means that the CPU will switch stacks and code._
+
+`swtch` does not know thread, it just store and restore registers (`context`). 
+
+scheduler's context: `cpu->scheduler`, this is the per-CPU scheduler context.
+
+`swtch` saves the old context:
+
+1.  Copy the arguments `%eax, %edx` from stack before change `%esp`. Because arguemnts are no longer accessible via `%esp`.
+2.  Only the callee-saved registers need to be saved, X86 convention: `%ebp, %ebx, %esi, %edi, %esp`. Push `%ebp, %ebx, %esi, %edi` to stack.
+3.  Save `%esp` to `old->context`. 
+4.  `%eip` is already on stack by `call` instruction: `call swtch`. **The old context is saved now.**
+
+Restores the new context (scheduler):
+
+1.  `%esp` to new stack pointer. New kernel stack is the same format.
+2.  Pop `%edi, %esi, %ebx, %ebp`
+3.  `swtch` return will restore `%eip`
+
+## Code: Scheduling
+
+Lock & release.
+
+**Coroutines**: The procedures in which _this_ stylized switching between 2 threads: A kernel thread always gives up CPU in `sched` and always switches back to this same location in scheduler, which almost always switches to some kernel thread that previously called `sched`.
+
+Scheduler's call to `swtch` does not end up in `sched`. `forkret`.
+
+**Round Robin**
+
+## Code: `mycpu` and `myproc`
+
+CPU identifies which process it's running, process identifies the CPU.
+
+Local APIC will help find the CPU - `mycpu` scan the CPU array.
+
+`myproc` to find the running process. Disable interrupt and call `mycpu` to find.
+
+## Code: `sleep` and `wakeup`
+
+Processes' interaction. `sleep` & `wakeup`: **sequence coordination or conditional synchronization**. 
+
+Sleep channel. -- wait queue in Linux. 
+
+## Code: `wait`, `exit` and `kill`
+
+`wait` system call that a parent process uses to wait for a child to exit. When a child exits, it does not die immediately. Instead, it switches to the `ZOMBIE` process state until the parent calls wait to learn of the exit. The parent is then responsible for freeing the memory associated with the process and preparing the `struct proc` for reuse. If the parent exits before the child, the `init` process adopts the child and waits for it, so that every child has a parent to clean up after it.
+
+An implementation challenge is the possibility of races between parent and child `wait` and `exit`.
+
+`wait`:
+
+1.  Acquire process table lock
+2.  Scan the process table to look for children
+3.  If find current process has child but non exited, call `sleep` to wait one of the child to exit
+4.  Scan again
+
+`exit`:
+
+1.  Acquire process table lock
+2.  Wake up any process sleeping on the wait channelequal to the current process's parent `proc`
+3.  If there is such process, it will be the parent in `wait`. 
+4.  Before exit reschedules, reparents all of the children, passing them to `initproc`
+5.  Finally, call `sched` to relinquish CPU
+
+Parent free childs kstack and pgdir.
+
+`kill`:
+
+1.  Set the victim: `victim->killed`. If victim is sleeping, wake it up.
+2.  Victim will enter or leave kernel, code in `trap` will call `exit` if it's killed.
+3.  If victim is in user space, it will trap into kernel by syscall or timer.
+4.  If victim is sleeping, `wakeup` from sleep, can be dangerous because the waiting condition is not true.
+
+## Real World
+
+`sleep` & `wakeup` synchronization challenge: the _lost wakeups_ problem. Linux's `sleep` uses an explicit process queue instead of a wait channel, the queue has its own internal lock.
+
+Scanning the entire process list in `wakeup` is inefficient. Use data structures that holds the list of processes sleeping on that structure. In this, `sleep --> wait`, `wakeup --> signal`. The sleep condition is protected by some lock.
+
+Semaphores: avoid the _lost wakeup_ problem.
+
+Terminating & cleaning up processes is very complex. 
