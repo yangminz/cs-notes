@@ -519,3 +519,152 @@ Scanning the entire process list in `wakeup` is inefficient. Use data structures
 Semaphores: avoid the _lost wakeup_ problem.
 
 Terminating & cleaning up processes is very complex. 
+
+# Debugging Xv6
+
+https://pdos.csail.mit.edu/6.828/2017/tools.html
+
+```
+sudo apt-get install gcc
+sudo apt-get install gdb
+```
+
+for build qemu patch
+
+```
+sudo apt-get install libsdl1.2-dev 
+sudo apt-get install libtool-bin 
+sudo apt-get install libglib2.0-dev 
+sudo apt-get install libz-dev 
+sudo apt-get install libpixman-1-dev 
+sudo apt-get install libfdt-dev
+```
+
+build qemu patch i386 only
+
+```
+git clone http://web.mit.edu/ccutler/www/qemu.git -b 6.828-2.3.0
+cd qemu
+./configure --disable-kvm --target-list="i386-softmmu x86_64-softmmu"
+make
+sudo make install
+```
+
+build xv6
+the official x86 source (but github is way too slow for domestic users)
+https://github.com/mit-pdos/xv6-public.git
+
+```
+git clone https://gitee.com/yangminz/xv6-public.git
+cd xv6-public
+make qemu-gdb
+```
+
+GDB session. Before start, add path to it.
+
+```
+b userinit
+```
+
+Step into `kalloc`. Allocate one physical frame for kstack of `userinit`:
+
+```
+#0  kalloc () at kalloc.c:87
+#1  0x8010351b in allocproc () at proc.c:95
+#2  0x801036dc in userinit () at proc.c:126
+#3  0x80102f0c in main () at main.c:36
+```
+
+Allocate one free frame from `struct run *:kmem.freelist`. Return the head node as pointer to the free list. 
+
+```
+(gdb) p kmem
+$3 = {lock = {locked = 0, name = 0x80106e4c "kmem", cpu = 0x0, pcs = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}, use_lock = 1,
+  freelist = 0x8dfff000}
+(gdb) p kmem.freelist
+$4 = (struct run *) 0x8dfff000
+(gdb) p kmem.freelist->next
+$5 = (struct run *) 0x8dffe000
+(gdb) p kmem.freelist->next->next
+$6 = (struct run *) 0x8dffd000
+```
+
+`0x8dfff000 -> 0x8dffe000 -> 0x8dffd000`, delta = `0x1000`, 4096 Bytes, one page.
+
+stack pointer `sp = p->kstack + KSTACKSIZE = 0x8dfff000 + 0x1000 = 0x8e000000`, one page offset.
+
+```
+0x8dffff90:     0x01010101      0x01010101      0x01010101
+
+0x8dffff9c:                                                     0x00000000  \ context sizeof(struct context) = 20
+0x8dffffa0:     0x00000000      0x00000000      0x00000000     <0x80103590> / forkret 
+
+0x8dffffb0:    <0x801053d5> trapret: {.text address}  size = 4: 1 .text address
+
+0x8dffffb4:                     0x01010101      0x01010101      0x01010101  \
+0x8dffffc0:     0x01010101      0x01010101      0x01010101      0x01010101  |
+0x8dffffd0:     0x01010101      0x01010101      0x01010101      0x01010101  + trap frame
+0x8dffffe0:     0x01010101      0x01010101      0x01010101      0x01010101  | sizeof(struct trapframe) = 76
+0x8dfffff0:     0x01010101      0x01010101      0x01010101      0x01010101  /
+
+0x8e000000:     Cannot access memory at address 0x8e000000
+kstacp bottom
+```
+
+To now, the process `userinit` is initialized. The main job of `allocproc()` is creating kernel stack, set the context, trapframe. 
+
+Now allocate page table for the process `setupkvm()`. Go through all pre-assigned kernel mappings: `kmap[0 : -1]`
+
+```
+static struct kmap {
+  void *virt;
+  uint phys_start;
+  uint phys_end;
+  int perm;
+} kmap[] =
+{
+  {virt = 0x80000000,                     phys_start = 0,           phys_end = 0x100000,  perm = PTE_W},  // I/O space
+  {virt = 0x80100000 <multiboot_header>,  phys_start = 0x100000,    phys_end = 0x108000,  perm = 0},      // kern text+rodata
+  {virt = 0x80108000 <ctlmap>,            phys_start = 0x108000,    phys_end = 0xe000000, perm = PTE_W},  // kern data+memory
+  {virt = 0xfe000000,                     phys_start = 0xfe000000,  phys_end = 0,         perm = PTE_W}   // more devices
+}
+```
+
+Call `mappages` to map the physical frames to virtual address. Create the page table mappings for the mappings above.
+
+`inituvm` allocate one free frame for user space: the user page from `0:4096` --> free frame
+
+Then set trapframe of `userinit`:
+
+```
+p = 
+{sz = 4096, pgdir = 0x8dffe000, kstack = 0x8dfff000 "", state = RUNNABLE, pid = 1, parent = 0x0,
+  tf = 0x8dffffb4, context = 0x8dffff9c, chan = 0x0, killed = 0, ofile = {0x0 <repeats 16 times>},
+  cwd = 0x80110a14 <icache+52>, name = "initcode\000\000\000\000\000\000\000"}
+```
+
+This trapframe becomes:
+
+```
+0x8dffffb4:     0x00000000
+                0x00000000
+                0x00000000
+                0x00000000
+0x8dffffc4:     0x00000000      
+                0x00000000      
+                0x00000000      
+                0x00000000
+0x8dffffd4:     0x00000000
+                0x00000000
+                0x00000023  es      
+                0x00000023  ds
+0x8dffffe4:     0x00000000
+                0x00000000
+                0x00000000  eip // beginning of initcode.S
+                0x0000001b  cs
+0x8dfffff4:     0x00000200  eflags
+                0x00001000  esp // page size
+                0x00000023  ss
+```
+
+TODO: b main --> mpmain --> scheduler
