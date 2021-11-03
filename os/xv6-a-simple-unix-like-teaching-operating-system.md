@@ -196,7 +196,7 @@ Then `userinit` sets up the trap frame with initial user mode state: `%cs, %ds, 
   p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
   p->tf->es = p->tf->ds;
   p->tf->ss = p->tf->ds;
-  p->tf->eflags = FL_IF;
+  p->tf->eflags = FL_IF;    // interrupt flag
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
 ```
@@ -386,7 +386,7 @@ IO APIC has a table. CPU can edit entries in the table through **memory-mapped I
 
 Timer chip is inside LAPIC, so each processor can receive timer interrupt independently. LAPIC to periodically generate an interrupt at IRQ_TIMER, which is IRQ 0. The interrupt would be routed to local processor.
 
-Timer interrupts through vector 32 (xv6 IRQ 0), an interrupt gate. Vector 64 is used for syscalls, a trap gate. Interrupt gates clear `IF` so the interrupted processor will be blocked - not receive any other interrupts while handling the current. Then interrupt follows the same code path as syscall & exceptions. Build trap frame.
+Timer interrupts through vector 32 (xv6 IRQ 0), an interrupt gate. Vector 64 is used for syscalls, a trap gate. Interrupt gates clear `IF` (interrupt flag) so the interrupted processor will be blocked - not receive any other interrupts while handling the current. Then interrupt follows the same code path as syscall & exceptions. Build trap frame.
 
 Timer interrupt do 2 things:
 
@@ -586,7 +586,8 @@ When the 80386 is used to execute software designed for architectures that don't
 
 An approach to space management that provides even further simplification of space-management software is to maintain a one-to-one correspondence between segment descriptors and page-directory entries, as Figure 5-13 illustrates. Each descriptor has a base address in which the low-order 22 bits are zero; in other words, the base address is mapped by the first entry of a page table. A segment may have any limit from 1 to 4 megabytes. Depending on the limit, the segment is contained in from 1 to 1K page frames. A task is thus limited to 1K segments (a sufficient number for many applications), each containing up to 4 Mbytes. The descriptor, the corresponding page-directory entry, and the corresponding page table can be allocated and deallocated simultaneously.
 
-> So actually logical address (virtual address) and linear address are almost the same concept. No need to distinguish them. But we need to know about the segment registers, etc.
+>   So actually logical address (virtual address) and linear address are almost the same concept. No need to distinguish them. But we need to know about the segment registers, etc.
+>   Now the segments are all flat in this way: cs start 0, length = whole virtual address, ds start 0, length = whole virtual address, ... So all segments are overlapped, each overing the all virtual adddress. In this way, the logical (virtual) address is just linear address.
 
 ## Interrupt and Exception
 
@@ -610,7 +611,7 @@ Protected Mode: <= 256 Interrupt/Exception vectors. Some are reserved by hardwar
 
 `IDT[index] = IDT gate descriptor entry`. 2 kinds of gate:
 
-1.  Interrupt Gate: CPU clear IF bit in case interrupted when handling interrupt. Used by interrupt
+1.  Interrupt Gate: CPU clear IF bit (interrupt flag) in case interrupted when handling interrupt. Used by interrupt
 2.  Trap Gate: interrupt when handling trap. Used by syscall.
 
 How to interrupt
@@ -626,6 +627,19 @@ How to interrupt
 6.  Load `cs` and `eip`, start handling.
 
 `iret`, the reverted procedure to go back from interrupt.
+
+_From Intel book. This function is provided by ISA hardware. So the hardware said that there will be a stack switch when interrupts_
+
+If the handler procedure is going to be executed at a numerically lower privilege level, a stack switch occurs. When the stack switch occurs:
+
+a.  The segment selector and stack pointer for the stack to be used by the handler are obtained from the TSS for the currently executing task. On this new stack, the processor pushes the stack segment selector and stack pointer of the interrupted procedure.
+b.  The processor then saves the current state of the EFLAGS, CS, and EIP registers on the new stack (see Figure 6-4).
+c.  If an exception causes an error code to be saved, it is pushed on the new stack after the EIP value.
+
+If the handler procedure is going to be executed at the same privilege level as the interrupted procedure:
+
+a.  The processor saves the current state of the EFLAGS, CS, and EIP registers on the current stack (see Figure 6-4).
+b.  If an exception causes an error code to be saved, it is pushed on the current stack after the EIP value.
 
 # Debugging Xv6
 
@@ -801,4 +815,117 @@ This trapframe becomes:
                 0x00000023  ss
 ```
 
-TODO: b main --> mpmain --> scheduler
+### `swtchuvm`
+
+From `main()` get into `scheduler()`. Process name: `initcode`, process info:
+
+```
+{
+    sz = 4096, 
+    pgdir = 0x8dffe000, 
+    kstack = 0x8dfff000, 
+    state = RUNNABLE, 
+    pid = 1, 
+    parent = 0x0,
+    tf = 0x8dffffb4, 
+    context = 0x8dffff9c, 
+    chan = 0x0, 
+    killed = 0, 
+    ofile = {0x0 <repeats 16 times>},
+    cwd = 0x80110a14 <icache+52>, 
+    name = "initcode"
+}
+```
+
+Now we check the register info of hardware. Go to qemu console in the box, `CTRL + A C` to switch to qemu console. `info registers` to get all register values:
+
+```
+EAX=0000000a EBX=80112d54 ECX=80112d2c EDX=00007bf8
+ESI=80112780 EDI=80112784 EBP=8010b578 ESP=8010b550
+EIP=801039af EFL=00000046 [---Z-P-] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+CS =0008 00000000 ffffffff 00cf9a00 DPL=0 CS32 [-R-]
+SS =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+DS =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+FS =0000 00000000 00000000 00000000
+GS =0000 00000000 00000000 00000000
+LDT=0000 00000000 0000ffff 00008200 DPL=0 LDT
+TR =0000 00000000 0000ffff 00008b00 DPL=0 TSS32-busy
+GDT=     801127f0 0000002f
+IDT=     80114ca0 000007ff
+CR0=80010011 CR2=00000000 CR3=003ff000 CR4=00000010
+DR0=00000000 DR1=00000000 DR2=00000000 DR3=00000000
+DR6=ffff0ff0 DR7=00000400
+EFER=0000000000000000
+```
+
+Now page table is `kpgdir`, the kernel page table of `scheduler`. And we check the kstack context:
+
+```
+0x8dffff9c:     0x00000000      0x00000000      0x00000000      0x00000000
+```
+
+Now we call `switchuvm`. After this call, let's check `cr3` register from qemu:
+
+```
+EAX=80112780 EBX=80112dd0 ECX=00000002 EDX=00000001
+ESI=80112780 EDI=80112784 EBP=8010b578 ESP=8010b550
+EIP=801039ba EFL=00000002 [-------] CPL=0 II=0 A20=1 SMM=0 HLT=0
+EAX=80112780 EBX=80112dd0 ECX=00000002 EDX=00000001
+ESI=80112780 EDI=80112784 EBP=8010b578 ESP=8010b550
+EIP=801039ba EFL=00000002 [-------] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+CS =0008 00000000 ffffffff 00cf9a00 DPL=0 CS32 [-R-]
+SS =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+DS =0010 00000000 ffffffff 00cf9300 DPL=0 DS   [-WA]
+FS =0000 00000000 00000000 00000000
+GS =0000 00000000 00000000 00000000
+LDT=0000 00000000 0000ffff 00008200 DPL=0 LDT
+TR =0028 80112788 00000067 00408900 DPL=0 TSS32-avl
+GDT=     801127f0 0000002f
+IDT=     80114ca0 000007ff
+CR0=80010011 CR2=00000000 CR3=0dffe000 CR4=00000010
+DR0=00000000 DR1=00000000 DR2=00000000 DR3=00000000
+DR6=ffff0ff0 DR7=00000400
+```
+
+Now we see the `cr3` has been switched to `initcode->pgdir`. The stack pointer is still the user stack pointer. How do we know that? Note that `esp` is not changed. And we check `cs` stack segment, the privilege level is `DPL=0`, so ring 3 and the user mode. 
+
+(One thing to note is that `initcode->pgdir` is virtual address!!! But it use kernel's mapping)
+
+Then kernel switches to scheduler thread. Note that we MUST use assembly to exactly control this switch job to store & restore the registers. Before the switching, we check registers and kstack for each:
+
+```
+initcode->kstack
+(gdb) p/x *p->context
+$19 = {edi = 0x0, esi = 0x0, ebx = 0x0, ebp = 0x0, eip = 0x80103590}
+
+scheduler->kstack
+NULL
+
+esp            0x8010b550
+```
+
+Now do context switch:
+
+```
+initcode->kstack
+(gdb) p/x *p->context
+$23 = {edi = 0x8010b5f4, esi = 0x200, ebx = 0x80112d70, ebp = 0x8dfffebc, eip = 0x80103a5c}
+
+scheduler
+{edi = 0x80112784, esi = 0x80112780, ebx = 0x80112dd0, ebp = 0x8010b578, eip = 0x801039d0}
+
+esp            0x8010b550
+```
+
+`esp` is still the kernel stack? 
+
+`switchkvm` switches `cr3` to scheduler's page table `kpgdir = (pde_t *) 0x803ff000`.
+
+_To this point, we can check the kernel page table and user page table relationship_
+
+
+
+
+
