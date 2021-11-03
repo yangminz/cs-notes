@@ -520,6 +520,113 @@ Semaphores: avoid the _lost wakeup_ problem.
 
 Terminating & cleaning up processes is very complex. 
 
+# uCore OS Gitbook
+
+[git-book](https://objectkuan.gitbooks.io/ucore-docs/content/)
+
+## Protected Mode and Segmentation
+
+In protected mode, all 32 address lines of 80386 are effective.
+
+2 segment tables: GDT (Global Descriptor Table) and LDT (Local Descriptor Table), each can have 2^13 descriptors, at most 2^13 + 2^13 segments.
+
+Only use segment in protected mode. Seach segment is defiend by starting address and max bytes. 
+
+Logical address (Process & CPU) --> physical address (RAM)
+
+Logical address = {segment selector, segment offset}. Translation:
+
+```C
+uint64_t get_physical_addr(logical_address_t logical_addr)
+{
+    // logical address is virtual address
+    if (CPU.protected == true)
+    {
+        linear_addr = 
+            CPU.GDT[logical_addr.segment_selector].base_address +
+            logical_addr.segment_offset;
+
+        if (CPU.paging == false)
+        {
+            // linear address is physical address
+            return linear_addr;
+        }
+        else
+        {
+            // linear address paging
+            return pagewalk(linear_addr);
+        }
+    }
+}
+```
+
+-   Segment descriptor entry: to describe a segment with: base addrss, size, attribute(e.g. present, writable, etc.)
+-   Global descriptor table: GDT, 2^13 descriptor entries. Saved in `GDTR` register.
+-   Segment selector: index bits (13 bits to select in GDT or LDT), indicator bit (use GDT or LDT), **Requested Privilege Level, RPL**.
+
+data segment register (ds) selector: 16-bit DT index + 1-bit table index + PRL
+
+code segment register (cs) selector: 16-bit DT index + 1-bit table index + CRL
+
+// `rip` stores the code address, `cs` describes the current code segment, CRL is the current privilege level of this instruction, indicating the current ring, user mode, kernel mode.
+
+CPU protects memory in 2 checkpoints: when a segment selector is loaded, when access a frame through linear address.
+
+When a data segment selector is loaded, check CPL, DPL, RPL to see if triggers protection error.
+
+When access physical frame, check page table to see if triggers page fault.
+
+[Combining Segment and Page Translation](https://pdos.csail.mit.edu/6.828/2018/readings/i386/s05_03.htm)
+
+5.3.1 "Flat" Architecture
+
+When the 80386 is used to execute software designed for architectures that don't have segments, it may be expedient to effectively "turn off" the segmentation features of the 80386. The 80386 does not have a mode that disables segmentation, but the same effect can be achieved by initially loading the segment registers with selectors for descriptors that encompass the entire 32-bit linear address space. Once loaded, the segment registers don't need to be changed. The 32-bit offsets used by 80386 instructions are adequate to address the entire linear-address space.
+
+5.3.6 Page-Table per Segment
+
+An approach to space management that provides even further simplification of space-management software is to maintain a one-to-one correspondence between segment descriptors and page-directory entries, as Figure 5-13 illustrates. Each descriptor has a base address in which the low-order 22 bits are zero; in other words, the base address is mapped by the first entry of a page table. A segment may have any limit from 1 to 4 megabytes. Depending on the limit, the segment is contained in from 1 to 1K page frames. A task is thus limited to 1K segments (a sufficient number for many applications), each containing up to 4 Mbytes. The descriptor, the corresponding page-directory entry, and the corresponding page table can be allocated and deallocated simultaneously.
+
+> So actually logical address (virtual address) and linear address are almost the same concept. No need to distinguish them. But we need to know about the segment registers, etc.
+
+## Interrupt and Exception
+
+RTOS polling to ask devices. Unix, interrupt.
+
+-   Asynchronous interrupt (interrupt)
+    -   timer
+    -   I/O
+-   Synchronous interrupt (exception)
+    -   system call
+    -   illegal access
+
+CPU gets interrupt through 8259A, halt, jump to interrupt handler through Interrupt Descriptor Table, IDT. IDT is anywhere in DRAM. IDTR, IDT register to search the starting address of IDT. ISA support:
+
+-   lidt, load IDTR
+-   sidt, store IDTR
+
+48-bit IDTR: base address + limit
+
+Protected Mode: <= 256 Interrupt/Exception vectors. Some are reserved by hardware. Some are registered by OS.
+
+`IDT[index] = IDT gate descriptor entry`. 2 kinds of gate:
+
+1.  Interrupt Gate: CPU clear IF bit in case interrupted when handling interrupt. Used by interrupt
+2.  Trap Gate: interrupt when handling trap. Used by syscall.
+
+How to interrupt
+
+1.  CPU checks 8259A after each instruction, read interrupt number
+2.  Goto IDT through IDTR, get gate through interrupt number
+3.  Get segment selector and segment descriptor from gate. PC jump to this interrupt handler's entry point
+4.  Check if privilege changes through segment descriptor.
+    - If user mode traps to kernel mode, get TSS from TR register (task register)
+    - Get kstack address from TSS, including `ss` and `esp`
+    - Switch to use kstack, push user-level `ss` and `esp` to kstack
+5.  Push the registers to trap frame in kstack
+6.  Load `cs` and `eip`, start handling.
+
+`iret`, the reverted procedure to go back from interrupt.
+
 # Debugging Xv6
 
 https://pdos.csail.mit.edu/6.828/2017/tools.html
@@ -562,9 +669,26 @@ make qemu-gdb
 
 GDB session. Before start, add path to it.
 
+
+## First User Process
+
+_To this stage, the kernel page table is set up. CPU is running kernel thread_
+
 ```
 b userinit
 ```
+
+This function setup the first user process. The pointer is a global variable:
+
+```
+static struct proc *initproc;
+```
+
+### Allocate `proc` PDB for the First User Process
+
+`proc` is from the pre-allocated process pool: `ptable.proc`. This is global variable on `.kdata`.
+
+**The main work here is allocating the one-page kernel stack. Set the context & trapframe on kstack for switch to scheduler.**
 
 Step into `kalloc`. Allocate one physical frame for kstack of `userinit`:
 
@@ -591,7 +715,7 @@ $6 = (struct run *) 0x8dffd000
 
 `0x8dfff000 -> 0x8dffe000 -> 0x8dffd000`, delta = `0x1000`, 4096 Bytes, one page.
 
-stack pointer `sp = p->kstack + KSTACKSIZE = 0x8dfff000 + 0x1000 = 0x8e000000`, one page offset.
+Stack pointer `sp = p->kstack + KSTACKSIZE = 0x8dfff000 + 0x1000 = 0x8e000000`, one page offset.
 
 ```
 0x8dffff90:     0x01010101      0x01010101      0x01010101
@@ -613,7 +737,11 @@ kstacp bottom
 
 To now, the process `userinit` is initialized. The main job of `allocproc()` is creating kernel stack, set the context, trapframe. 
 
-Now allocate page table for the process `setupkvm()`. Go through all pre-assigned kernel mappings: `kmap[0 : -1]`
+### Allocate Page Table for the First User Process
+
+Now allocate page table for the process `setupkvm()`. This create one new frame for level-1 page directory, but the following level-2 page table is the same as kernel page tables (both `kvm`).
+
+Go through all pre-assigned kernel mappings: `kmap[0 : -1]`
 
 ```
 static struct kmap {
@@ -632,7 +760,13 @@ static struct kmap {
 
 Call `mappages` to map the physical frames to virtual address. Create the page table mappings for the mappings above.
 
-`inituvm` allocate one free frame for user space: the user page from `0:4096` --> free frame
+_To this stage, the page table of `initproc` is the same as kernel._
+
+`vm.c: inituvm` allocate one new free frame for user space to hold the code & data of `initproc`. The program data should be in `initcode.S`.
+
+Remap the user page tabe (original same as kernel) from `0:4096` --> free frame. Load user .text & .data (< one page size) into this free frame.
+
+### Set up the trapframe
 
 Then set trapframe of `userinit`:
 
