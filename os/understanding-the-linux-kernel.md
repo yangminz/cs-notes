@@ -100,6 +100,8 @@ right after switching from user mode to kernel, kernel stack is always empty (no
 
 So in kernel mode, with `rsp` value in CPU, we can get `thread_info`, and then `task_struct`.
 
+> Why we need this? Because when trap (from user to kernel, `int`), the kernel process only knows: the `esp` value from saved TSS, the `rip` from the IDT, trap handler entry point. Although the kernel process does not need to switch page table `%cr3`, but it need other information from `task_struct`. What we have now is: `esp, eip`, all other registers are zero or user data. One method is place the pointer of current `task_struct` as kdata, and at the entry point, assign this pointer to one register. But this is not good because it involes kernel page mapping. So the method is get `task_struct` directly from `kstack, %esp`. `%esp - 8KB + sizeof(thread_info)` is a constant operation, and will give the `task_struct` directly.
+
 #### The process lists
 
 `task_struct` are linked together. The head: Pid 0 **process 0 or swapper**
@@ -180,6 +182,80 @@ Step 2 is performed by the `switch_to` marco. Need Prev, Next, Last: Prev -> Nex
 store the registers flags, registers, PC to kernel stack. and restore the context of the new process.
 
 # Chapter 4. Interrupts And Exceptions
+
+## 4.1 The Role of Interrupt Signals
+
+Diff {interrupt, context switch}: they are all kernel substitution, but code executed by interrupt is not a process. Interrupt is lighter than process. 
+
+Interrupt is asynchronous, and can be interrupted by another interrupt. Be careful about the race conditions.
+
+## 4.2 Interrupts and Exceptions
+
+### IRQs and Interrupts
+
+Interrut ReQuest (IRQ) Line, hardware _Programmable Interrupt Controller_(PIC): Monitor IRQ lines, select the low pin one, wait until CPU ack interrupt. By `IF` flag in `eflag`, CPU can ignore the interrupts sent from PIC.
+
+### Interrupt Descriptor Table
+
+`IDTR` register stores the physical address.
+
+IDT associates each interrupt/exception with the address of its handler. IDT must be initialized before kernel enable interrupts. 3 types of descriptors in IDT, task gate descriptor, interrupt gate descriptor, trap gate descriptor:
+
+```
+Interrupt Gate
+0   :   15  Offset
+16  :   31  Segment Selector
+32  :   36  Reserved
+37  :   37  0
+38  :   38  0
+39  :   39  0
+40  :   40  0
+41  :   41  1
+42  :   42  1
+43  :   43  1
+44  :   44  0
+45  :   46  DPI
+47  :   47  P
+48  :   63  Offset
+
+Trap Gate
+0   :   15  Offset
+16  :   31  Segment Selector
+32  :   36  Reserved
+37  :   37  0
+38  :   38  0
+39  :   39  0
+40  :   40  1
+41  :   41  1
+42  :   42  1
+43  :   43  1
+44  :   44  0
+45  :   46  DPI
+47  :   47  P
+48  :   63  Offset
+```
+
+### Hardware Handling of Interrupts and Exceptions
+
+Precondition: CPU running in Protected Mode. 
+
+After executing an instruction, before executing the next instruction, CPU checks if interrupt or exception. If there is:
+
+1.  Determin the vector / interrupt number `i`
+2.  Get `IDT` by `idtr` register, read `IDT[i]`
+3.  Get `GDT` by `gdtr` register, look for the segment by the `IDT[i].segment_selector`. This is the segment includes the base address of handler
+4.  Check privilege level is correct.
+5.  Check if privilege level change. 
+    -   If user to kernel
+        -   Read `tr` register to get the task. The TSS segment of the running process. This TSS segment stores the kernel register information
+        -   Load kernel `ss` and `esp` from TSS as kstack.
+        -   Push user `ss` and `esp` to kstack.
+6.  If fault, load `cs` and `eip`
+7.  Push `eflags`, `cs`, `eip` to kstack
+8.  If exception with hardware error code, save error code on stack
+9.  Load `cs` and `eip` from segment selector and offset from `IDT[i]` gate. It's a jump to interrupt/exception handler. The control goes back to OS till this point.
+
+`iret` the opposite operations.
 
 # Chapter 8. Memory Management
 
