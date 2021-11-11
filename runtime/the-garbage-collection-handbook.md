@@ -232,9 +232,52 @@ Usually arbitrary + sliding.
 
 ## 3.1 Two-finger compaction
 
-Best for compacting regions containing objects of a fixed size. A 2-Pass, arbitrary order algorithm.
+Best for compacting regions containing objects of a **fixed object size**. A 2-Pass, arbitrary order algorithm. `object < free`: live object; `scan < object`: garbage. In the middle: unknown.
 
+```cs
+void Compact()
+{
+    // Relocate
+    object free = HeapStart;
+    object scan = HeapEnd;
 
+    while (free < scan)
+    {
+        while (free.IsMarked() == true)
+        {
+            free.UnsetMarked();
+            free = free.Next();
+        }
+        // now free is pointing to an unmarked object
+
+        while (scan.IsMarked() == false && free < scan)
+        {
+            scan = scan.Prev();
+        }
+        // now scan is pointing to a marked object
+
+        if (free < scan)
+        {
+            scan.UnsetMarked();
+            // because this is fixed size object
+            CopyFromTo(scan, free);
+
+            free = free.Next();
+            scan = scan.Prev();
+        }
+    }
+
+    // update reference
+    foreach (object fld in Roots)
+    {
+        object ref = fld;
+        if (ref >= HeapEnd)
+        {
+            
+        }
+    }
+}
+```
 
 
 
