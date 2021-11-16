@@ -104,7 +104,7 @@ void *New()
 exclusive void Collect()
 {
     MarkFromRoots();
-    Sweep(HeapStart, HeapEnd);
+    Sweep(Heap.Start, Heap.End);
 }
 ```
 
@@ -232,53 +232,170 @@ Usually arbitrary + sliding.
 
 ## 3.1 Two-finger compaction
 
-Best for compacting regions containing objects of a **fixed object size**. A 2-Pass, arbitrary order algorithm. `object < free`: live object; `scan < object`: garbage. In the middle: unknown.
+Best for compacting regions containing objects of a **fixed object size**. A 2-Pass, arbitrary order algorithm. `object < low`: live object; `high < object`: garbage. In the middle: unknown.
 
 ```cs
 void Compact()
 {
     // Relocate
-    object free = HeapStart;
-    object scan = HeapEnd;
+    object low = Heap.Start;
+    object high = Heap.End;
 
-    while (free < scan)
+    while (low < high)
     {
-        while (free.IsMarked() == true)
+        while (low.IsMarked() == true)
         {
-            free.UnsetMarked();
-            free = free.Next();
+            low.UnsetMarked();
+            low = low.IncreaseObject();
         }
-        // now free is pointing to an unmarked object
+        // now low is pointing to an unmarked object
 
-        while (scan.IsMarked() == false && free < scan)
+        while (high.IsMarked() == false && low < high)
         {
-            scan = scan.Prev();
+            high = low.DecreaseObject();
         }
-        // now scan is pointing to a marked object
+        // now high is pointing to a marked object
 
-        if (free < scan)
+        if (low < high)
         {
-            scan.UnsetMarked();
+            high.UnsetMarked();
             // because this is fixed size object
-            CopyFromTo(scan, free);
+            CopyFromTo(from: high, to: low);
 
-            free = free.Next();
-            scan = scan.Prev();
+            // record the moved new low address in high free block
+            high.WriteAddress(low);
+
+            low = low.IncreaseObject();
+            high = high.DecreaseObject();
         }
     }
 
+    object waterMark = high;
+
     // update reference
-    foreach (object fld in Roots)
+
+    // updating references in roots
+    foreach (object ptr in Roots)
     {
-        object ref = fld;
-        if (ref >= HeapEnd)
+        if (ptr.PointerValue > waterMark)
         {
-            
+            // this pointer is moved to low space
+            object moved = (object)ptr.PointerValue;
+            ptr.PointerValue = moved.PointerValue;
         }
+    }
+
+    // updating references in low space
+    low = Heap.Start;
+    while (low < Heap.End)
+    {
+        foreach (object ptr in low.Referencing())
+        {
+            // ptr is referencing another address
+            // e.g. class A { private class B b; } a;
+            // a - low; b - ptr
+            if (ptr.PointerValue > waterMark)
+            {
+                // this pointer is moved to low space
+                object moved = (object)ptr.PointerValue;
+                ptr.PointerValue = moved.PointerValue;
+            }
+        }
+        low = low.IncreaseObject();
     }
 }
 ```
 
+## 3.2 The Lisp 2 algorithm
+
+Can have parallel form. Compaction are usually slow, but Lisp 2 is fast. Drawback: every object needs an additional full-slot field in header to store the address to which the object is to be moved. Also used for mark-bit.
 
 
+```cs
+void Compact()
+{
+    // 3 passes
 
+    // compute locations
+    address slow = Heap.Start;
+    object fast = Heap.Start;
+
+    while (fast < Heap.End)
+    {
+        if (fast.IsMarked() == true)
+        {
+            // live object
+            // fast is the lived object
+            // slow is the location fast would be moved
+            // fast recoreds this place in its header
+            // And it's true that moved <= address(object)
+            fast.HeaderBytes.WriteBytes(slow);
+            slow += sizeof(fast);
+        }
+        fast = fast.IncreaseObject();
+    }
+
+    // update references first
+    // update roots
+    foreach (object ptr in Roots)
+    {
+        if (ptr.PointerValue != null)
+        {
+            ptr.PointerValue = ptr.PointerValue.HeaderBytes;
+        }
+    }
+    // update fields
+    object low = Heap.Start;
+    while (low < Heap.End)
+    {
+        if (low.IsMarked() == true)
+        {
+            foreach (object ptr in low.Referencing())
+            {
+                if (ptr.PointerValue != null)
+                {
+                    ptr.PointerValue = ptr.PointerValue.HeaderBytes;
+                }
+            }
+        }
+        low = low.IncreaseObject();
+    }
+    
+    // relocate
+    low = Heap.Start;
+    while (low < Heap.End)
+    {
+        if (low.IsMarked() == true)
+        {
+            address moved = low.HeaderBytes;
+            CopyFromTo(from: low, to: moved);
+            moved.UnsetMarked();
+        }
+        low = low.IncreaseObject();
+    }
+}
+```
+
+Parallel compaction: divide the heap into blocks.
+
+## 3.5 Issues to consider
+
+-   Is compaction necessary?
+
+Mark-sweep: non-moving collector, vulnerable to fragmentation. Most run time environment use compaction.
+
+-   Throughput costs of compaction
+
+For throughput, compacting < non-compacting: more passes over the heap. Trade-off: Run mark-sweep as long as possible, switching to mark-compact only when metrics detects that it's worth compacting.
+
+-   Long-lived data
+
+Long-lived or immortal data will accumulate near the heap start. Not necessary to collect them. So generational collectors move the long lived to another space.
+
+-   Locality
+
+Mark-compact sequentially may preserve the allocation order of objects, so maybe good for cache locality.
+
+-   Limitations of mark-compact algorithms
+
+To what extent is compaction necessary? Most compaction algorithms preclude the use of interior pointers except Two-Finger.
