@@ -815,5 +815,199 @@ Most common solution: trial deletion. Key point: tracing is only needed for poss
 2.  Check the count of each node in these subgraphs: if > 0, then ex-subgraph reference exists, so will not be cycle members, color black. Else, color white.
 3.  Reclaim the white, they are all garbages.
 
+```cs
+public class Collector
+{
+    [ThreadSafe]
+    public static void Collect()
+    {
+        // Mark candidates
+        foreach (TrialDelRCObject obj in Candidates)
+        {
+            if (obj.Color == Purple)
+            {
+                // recursively mark grey and decrease counter: 
+                // strong connected component are all grey
+                this.DfsMarkGrey(obj);
+            }
+            else
+            {
+                Candidates.Remove(obj);
+                if (obj.Color == Black && obj.RefCount == 0)
+                {
+                    Free(obj);
+                }
+            }
+        }
+        // now candidates is purple only
+        // all black & count = 0 candidates are freed
 
+        foreach (TrialDelRCObject obj in Candidates)
+        {
+            // strong connected component:
+            // grey becomes white if counter is 0
+            // black, and counter +1 if counter > 0
+            this.DfsScan(obj);
+        }
+
+        // collect candidates
+        while (Candidates.IsEmpty() == false)
+        {
+            this.DfsCollectWhite(Candidates.Pop());
+        }
+    }
+
+    public void DfsMarkGrey(TrialDelRCObject obj)
+    {
+        if (obj.Color != Grey)
+        {
+            obj.Color = Grey;
+
+            foreach (RCObject child in this.Referencing())
+            {
+                if (child != null)
+                {
+                    child.RefCount -= 1;
+                    // recursive mark grey and decrease counter
+                    this.DfsMarkGrey(child);
+                }
+            }
+        }
+    }
+
+    public void DfsScan(TrialDelRCObject obj)
+    {
+        if (obj.Color == Grey)
+        {
+            if (obj.RefCount > 0)
+            {
+                this.DfsScanBlack(obj);
+            }
+            else
+            {
+                obj.Color = White;
+
+                foreach (RCObject child in this.Referencing())
+                {
+                    if (child != null)
+                    {
+                        this.DfsScan(child);
+                    }
+                }
+            }
+        }
+    }
+
+    public void DfsScanBlack(TrialDelRCObject obj)
+    {
+        obj.Color = Black;
+        
+        foreach (RCObject child in this.Referencing())
+        {
+            if (child != null)
+            {
+                child.RefCount += 1;
+
+                if (child.Color != Black)
+                {
+                    this.DfsScanBlack(child);
+                }
+            }
+        }
+    }
+
+    public void DfsCollectWhite(TrialDelRCObject obj)
+    {
+        if (obj.Color == White && 
+            Candidates.Contains(obj) == false)
+        {
+            obj.Color = Black;
+
+            foreach (RCObject child in this.Referencing())
+            {
+                if (child != null)
+                {
+                    this.DfsCollectWhite(child);
+                }
+            }
+
+            Free(obj);
+        }
+    }
+}
+
+public class TrialDelRCObject : RCObject
+{
+    private COLOR Color;
+
+    public void TrialDelRCObject()
+    {
+        this.SelfAddress = Allocate();
+        if (this.SelfAddress == null)
+        {
+            Collector.Collect();
+
+            this.SelfAddress = Allocate();
+            if (this.SelfAddress == null)
+            {
+                throw new OutOfMemoryException();
+            }
+        }
+
+        this.RefCount = 0;
+    }
+
+    public override void IncreaseCounter()
+    {
+        this.RefCount += 1;
+        // black color cannot be in a garbage cycle
+        this.Color = Black;
+    }
+    
+    public void DecreaseCounter()
+    {
+        this.RefCount -= 1;
+
+        if (this.RefCount == 0)
+        {
+            foreach (RCObject child in this.Referencing())
+            {
+                child.DecreaseCounter();
+            }
+
+            // objects on the free list are black
+            this.Color = Black;
+
+            if (Candidates.Contains(this.SelfAddress) == false)
+            {
+                Free(this.SelfAddress);
+            }
+        }
+        else
+        {
+            // might isolate a garbage cycle
+            if (this.Color != Purple)
+            {
+                this.Color = Purple;
+                Candidates.Add(this.SelfAddress);
+            }
+        }
+    }
+}
+```
+
+The color and states:
+
+-   Black: Live object or free object
+-   White: Garbage
+-   Grey: Possible member of a garbage cycle
+-   Purple: objects that are candidates for roots of garbage cycles.
+
+## 5.7 Issues to consider
+
+Good for locality. But cannot reclaim an object until the last pointer to the object has been removed. Big problem, overhead to reference read / write.
+
+Stop-the-world pause
+
+# Chapter 9. Generational garbage collection
 
