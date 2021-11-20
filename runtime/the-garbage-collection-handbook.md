@@ -1011,3 +1011,111 @@ Stop-the-world pause
 
 # Chapter 9. Generational garbage collection
 
+Long-lived object problem: stay at the start place of the heap (compact or copy). Generational collectors: not consider the oldest objects. 
+
+Seperate objects by age into generations. Younger generations are collected in preference to older ones. Most gen-collectors manage younger generations by copying. 
+
+Need to track the generations. Bring bookkeeping overhead on mutators.
+
+## 9.1 Example
+
+Collecting young problem: young object is not reachable from Roots, but reachable from old. When mark young, cannot mark such objects.
+
+Solution: Record _Inter-Generational_ pointers. **Write Barrier**. Timing:
+
+1.  Record inter-generational relationship when pointer assignment.
+2.  Record when young promoted to old.
+
+Use a table to record the cross region referenced pointers. Treat it as roots. But this solution exacerbates the problem of floating garbage. 
+
+## 9.2 Measuring time
+
+Userability: response in time, will not disturb user, hard real-tme guarantee. 
+
+Tricky. In practice, how may collections an object has survived.
+
+## 9.3 Generational hypotheses
+
+Weak hypothesis: most objects die young. Supported by statistics in many cases. 
+
+Strong hypothesis: even for older objects, the younger, the lower survival rates. 
+
+Learn: treat large object specially.
+
+## 9.4 Generations and heap layout
+
+May 2+ generations, each generation bounded in size. Flat structure. Manage large objects specially.
+
+Primary Goal: _Reduce pause times and improve throughput._ Possible problem: collect so frequently, young objects soon collected, old soon filled. 
+
+Newly allocated objects are updated more frequently than the older ones, so do not collect prematurely. 
+
+## 9.5 Multiple generations
+
+Balance: minor collections should be small (so it's fast) vs major collections are expensive.
+
+Use middle generations to filter out objects that is old, but not too old. So the young collections is small and fast, whilst oldest is not increasing rapidly.
+
+Drawback: additional overhead. Most morden run-time use 2 generations (young + old).
+
+## 9.6 Age recording
+
+Age recording and promotion policy are tightly coupled.
+
+### En masse promotion
+
+Each generation is a single semispace. When collected, all surviving objects are promoted en masse to the next.
+
+### Aging semispaces
+
+A generation = 2 aging spaces (_from space_ & _to space_). Delay promotion: moved from fromspace to tospace within the generation before promotion. 
+
+### Survivor spaces and flexibility
+
+Young generation as one large creation space (eden) + 2 smaller buckets (survivor semispaces). Objects are allocated in eden. All live eden objects promoted to the survivor tospace. Live objects in survivor fromspace are evacuated to tospace within the young generation or promoted to the next generation, depending on the age.
+
+## 9.8 Inter-generational pointers
+
+When collect a generation, the roots consist not only of registers, stacks, globals, but also references from other parts in the heap. 
+
+Inter-generational pointers are created in 3 ways:
+
+1.  Initialize writes as an object is creates
+2.  By updating pointer slots
+3.  By moved to different generations
+
+### Remembered sets
+
+Remembered sets record the location of possible sources of pointers.
+
+### Pointer direction
+
+No need to record the young-to-old pointers. 
+
+Pointer filtering.
+
+## 9.9 Space management
+
+Young collections: frequent and brief
+
+Old collections: infrequent and expensive
+
+Mark-sweep + sometimes compacting.
+
+## 9.11 Beltway
+
+5 key insights:
+
+1.  Most objects die young - the weak generational hypothesis
+2.  Gen collectors avoid repeatedly collecting old objects
+3.  Exploit incrementality to improve response times
+4.  Small nurseries managed by sequential allocators improve data locality
+5.  Objects need sufficient time to die.
+
+## 9.13 Issues to consider
+
+Reduce pause time: limit size of young gen and concentrate collection effort on it. But it only works within weak hypothesis.
+
+This improves only the expected pauses times, eventually must collect the full heap and cannot solve the problem of worst case pause. So _cannot meet the requirement of hard real-time._
+
+Problem: premature promotion.
