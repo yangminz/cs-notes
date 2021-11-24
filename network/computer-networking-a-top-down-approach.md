@@ -252,6 +252,116 @@ DDoS Bandwidth-flooding attack. Targeting at DNS server, targeting at origin ser
 
 # Chapter 3 Transport Layer
 
+Central piece of layered arch.
+
+## 3.1 Introduction and Transport-Layer Services
+
+Provide: **logical communication** between the processes running on different hosts, as if the hosts is directly connected. 
+
+Implemented in end systems but not network routers. Split app-layer message into packets (Transport-layer segments) by breaking message into smaller chunks and adding transport-layer header.
+
+```
+application level messages
+app chunk 1, chunk 2, ...
+trans header + app chunk 1, trans header + app chunk 2, ...
+network packet{trans header + app chunk 1}, network packet{trans header + app chunk 2}, ...
+```
+
+Network routers act only on the network-level packet (datagram).
+
+### 3.1.1 Relationship Between Transport and Network Layers
+
+Trans-level protocol are constrained by the underlying net-level protocols. E.g., delay, bandwidth, trop, etc. TCP can offer reliable data transfer service even when datagram loses. Also can provide encryption, while net-level cannot.
+
+Trans-level protocol themselves are processes running in end-system.
+
+### 3.1.2 Overview of the Transport Layer in the Internet
+
+-   **UDP**: User datagram protocol, unreliable, connectless. Transport-layer multiplexing & error check.
+-   **TCP**: Transmission control protocol, reliable, connect-oriented. Transport-layer multiplexing & error check. _Reliable data transfer. Congestion control._
+
+Network-level: **IP, internet protocol**. It's a _best-effort delivery service_. No guarantees that the datagram will be delivered. So it's unreliable.
+
+TCP/UDP extends IP's delivery service, from host-to-host delivery to process-to-process. **Transport-layer multiplexing** and **transport-layver demultiplexing** (by port).
+
+## 3.2 Multiplexing and Demultiplexing
+
+Transport layer receives segments from network layer, then deliver these app-message to corresponding process. Transport layer delivers message to the socket address of network app. 
+
+Demultiplexing: Each trans-layer segment has fields to identify the receiving socket, and will deliver the app message to it.
+
+Multiplexing: Different sockets providing different app message, each encapsulated with header information (segment), passing the segments to network layer.
+
+The multiplexing requires:
+
+1.  Sockets have unique identifier
+2.  Each transport layer segment has fields to identify the socket: source port number field & destination port number field.
+
+0-1023 are reserved well known port numbers. 1024-65535 are free to use. 80 for HTTP.
+
+### Connectionless Multiplexing and Demultiplexing
+
+UDP is using 2-tuple socket: (destination IP address, destination port number). So 2 segments with different source IP address and/or port number, but same destination IP address and port number, then will go to the same destination process.
+
+Source port is used return address when destination wants to send back to source.
+
+Example
+
+```
+Host A:
+    Web Client
+        (dest port: 8080,  dest IP: B)    source port: 26145,    source IP: A
+Host C:
+    Web Client
+        (dest port: 8080,  dest IP: B)    source port: 7532,     source IP: C
+        (dest port: 8080,  dest IP: B)    source port: 26145,    source IP: C
+Server B:
+    Web Server: 3 segments go to the same socket
+```
+
+### Connection-Oriented Multiplexing and Demultiplexing
+
+Different UDP, TCP socket is 4-tuple: (source IP address, source port number, destination IP address, destination port number). So 2 TCP segments with different source IP addr or source port numbers will be directed to 2 different sockets. 
+
+Example
+
+```
+Host A:
+    Web Client
+        (source port: 26145,    source IP: A,   dest port: 80,  dest IP: B)
+Host C:
+    Web Client
+        (source port: 7532,     source IP: C,   dest port: 80,  dest IP: B)
+        (source port: 26145,    source IP: C,   dest port: 80,  dest IP: B)
+Server B:
+    Web Server: 3 different TCP connections (sockets)
+```
+
+### Web Server and TCP
+
+Modern high-performing web servers often use only one process, create a new thread with a new connection socket for each new client. So many connection sockets (with different identifiers) attached to the same process. 
+
+## 3.3 Connectionless Transport: UDP
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Chapter 4 The Network Layer
 
 # Chapter 8 Security in Computer Networks
