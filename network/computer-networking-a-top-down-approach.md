@@ -343,9 +343,70 @@ Modern high-performing web servers often use only one process, create a new thre
 
 ## 3.3 Connectionless Transport: UDP
 
+RFC 768
 
+UDP: minimal transport layer protocol: multiplexing/demultiplexing and light error checking. Adds nothing to IP, app almost directly talks with IP. DNS is using UDP. 
 
+Connectionless: no handshaking.
 
+UDP is good for:
+
+1.  Finer application-level control over what data is sent and when. UDP will immediately send the segment to network layer. While TCP has congestion-control mechanism.
+2.  No connection establishment. E.g. DNS uses UDP to avoid 3-way handshaking to reduce latency. HTTP uses TCP to ensure reliability.
+3.  No connection state. TCP maintains connection states. So UDP clients is more than TCP.
+
+Application can build relability over UDP. **QUIC**.
+
+### 3.3.1 UDP Segment Structure
+
+RFC 768
+
+The hex numbers:
+
+```
+ssss    - 16 bits, source port number
+dddd    - 16 bits, destination port number
+llll    - 16 bits, length of UDP segment (header + payload)
+cccc    - 16 bits, check sum for error detection
+pppp    - payload data
+pppp
+....
+```
+
+### 3.3.2 UDP Checksum
+
+Checksum provides for error detection. If the bits within the UDP segment have been altered, e.g., by the noise in links or router.
+
+Calculation:
+
+```
+0110011001100000    - a
+0101010101010101    - b
+---------------------------
+1011101110110101    - a+b
+1000111100001100    - c
+---------------------------
+0100101011000001    - a+b+c (overflow)
+---------------------------
+1011010100111110    - ~(a+b+c) (complement), checksum
+```
+
+At receiver, all 16-bit word are added, including the checksum, so it should be `1111111111111111` (can overflow):
+
+```
+0110011001100000    - a
+0101010101010101    - b
+1000111100001100    - c
+1011010100111110    - checksum
+-------------------------------
+1111111111111111
+```
+
+Note that checksum can collide.
+
+Because lower layers may not provide error checking, so transport layer needs it.
+
+## 3.4 Principles of Reliable Data Transfer
 
 
 
