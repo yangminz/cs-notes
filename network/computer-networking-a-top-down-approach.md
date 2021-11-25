@@ -87,6 +87,8 @@ Default mode of HTTP uses persistent connections with pipelining.
 
 ### 2.2.3 HTTP Message Format
 
+This is actually a state machine:
+
 ```
 HTTP-message    = Request | Response     ; HTTP/1.1 messages
 
@@ -408,16 +410,296 @@ Because lower layers may not provide error checking, so transport layer needs it
 
 ## 3.4 Principles of Reliable Data Transfer
 
+Reliable Data Transfer (RDT) is not only at transport layer. Reliability is fundamental problem in networking: the transferred data for upper layer is not corrupted (lower layer maybe unreliable, IP). 
 
+### 3.4.1 Building a Reliable Data Transfer Protocol
 
+When packets will be delivered in the order which they were sent ...
 
+#### Reliable Data Transfer over a Perfectly Reliable Channel: rdt1.0
 
+First consider the IP channel is completely reliable.
 
+Finite State Machine (FSM) defines rdt1.0 sender and receiver:
 
+```csharp
+public class Sender
+{
+    public State CurrentState = Waiting_App_Data_Available;
 
+    public void Transfer(FsmInput input)
+    {
+        // no state change
+        if (input.Type == Waiting)
+        {
+            // still waiting
+            return;
+        }
+        else if (input.Type == App_Data_Available)
+        {
+            // app calls sending
+            // do the sending
+            NetworkSend(new TransportSegment(input.AppData));
+        }
+    }
+}
 
+public class Receiver
+{
+    public State CurrentState = Waiting_Sender_Segment_Available;
 
+    public void Transfer(FsmInput input)
+    {
+        if (this.CurrentState == Waiting_Sender_Segment_Available)
+        {
+            if (input.Type == Waiting)
+            {
+                // still waiting
+                return;
+            }
+            else if (input.Type == Sender_Segment_Available)
+            {
+                // app calls sending
+                // do the sending
+                TransportDeliver(new AppData(input.SenderSegment));
+            }
+        }
+    }
+}
+``` 
 
+Because IP layer is reliable, so just a encapsulate & decapsulate.
+
+#### Reliable Data Transfer over a Channel with Bit Errors: rdt2.0
+
+Retransmission if failed to ack: **Automatic Repeat ReQuest (ARQ) protocol**. Require 3 capabilities:
+
+1.  Error detection. E.g. error detection field. Further, error correction (limited)
+2.  Receiver feedback. Positive (ACK) & negative (NAK). 
+3.  Retransmission. If a packet is received in error, sender need to retransmit.
+
+```csharp
+public class Sender
+{
+    public State CurrentState = Waiting_App_Data_Available;
+    public TransportSegment CachedForRetransmission;
+
+    public void Transfer(FsmInput input)
+    {
+        if (this.CurrentState == Waiting_App_Data_Available)
+        {
+            if (input.Type == App_Data_Available)
+            {
+                // app calls sending
+                // waiting for receiver's ACK
+                this.CachedForRetransmission = new TransportSegment(input.AppData);
+                NetworkSend(this.CachedForRetransmission);
+
+                this.CurrentState = Waiting_Receiver_ACK;
+                return;
+            }
+        }
+        else if (this.CurrentState == Waiting_Receiver_ACK)
+        {
+            if (input.Type == Receiver_ACK_Available)
+            {
+                // receiver has sent ACK or NAK                
+                if (input.ReceiverSegment.IsAck() == true)
+                {
+                    // receiver sends ACK
+                    // wait for the next app's sending call
+                    // unlocked
+                    this.CurrentState = Waiting_App_Data_Available;
+                }
+                else if (input.ReceiverSegment.IsNak() == true)
+                {
+                    // receiver sends NAK
+                    // retransmit
+                    NetworkSend(this.CachedForRetransmission);
+                    // state is still waiting for receiver's ACK
+                }
+            }
+        }
+    }
+}
+
+public class Receiver
+{
+    public State CurrentState = Waiting_Sender_Segment_Available;
+
+    public void Transfer(Event input)
+    {
+        if (this.CurrentState == Waiting_Sender_Segment_Available)
+        {
+            if (input.Type == Sender_Segment_Available)
+            {
+                if (input.SenderSegment.IsCorrupted() == true)
+                {
+                    // corrupted
+                    NetworkSend(new TransportSegment(NAK));
+                }
+                else
+                {
+                    // not corrupted
+                    TransportDeliver(new AppData(input.SenderSegment));
+                    NetworkSend(new TransportSegment(ACK));
+                }
+            }
+        }
+    }
+}
+```
+
+When sender is waiting ACK or NAK (state 2), it cannot get more data from application layer. So it's a _Stop-and-Wait Protocol_.
+
+Problem for rdt2.0: what if ACK/NAK packet is corrupted? Add sequence number. Receiver check the sequence number to determine if the packet is a retransmission. For rdt2.0, 1 bit is enough. 
+
+```csharp
+public class Sender
+{
+    public State CurrentState = Waiting_App_Data_Available_Seq0;
+    public TransportSegment CachedForRetransmission;
+
+    public void Transfer(FsmInput input)
+    {
+        if (this.CurrentState == Waiting_App_Data_Available_Seq0)
+        {
+            if (input.Type == App_Data_Available)
+            {
+                // app calls sending
+                // waiting for receiver's ACK
+                this.CachedForRetransmission = new TransportSegment(input.AppData, sequence_number: 0);
+                NetworkSend(this.CachedForRetransmission);
+
+                this.CurrentState = Waiting_Receiver_ACK_Seq0;
+                return;
+            }
+        }
+        else if (this.CurrentState == Waiting_Receiver_ACK_Seq0)
+        {
+            if (input.Type == Receiver_ACK_Available)
+            {
+                // receiver has sent ACK or NAK                
+                if (input.ReceiverSegment.IsAck() == true)
+                {
+                    // receiver sends ACK
+                    // wait for the next app's sending call
+                    // unlocked
+                    this.CurrentState = Waiting_Receiver_ACK_Seq1;
+                }
+                else if (input.ReceiverSegment.IsNak() == true)
+                {
+                    // receiver sends NAK
+                    // retransmit
+                    NetworkSend(this.CachedForRetransmission);
+                    // state is still waiting for receiver's ACK
+                }
+            }
+        }
+        if (this.CurrentState == Waiting_App_Data_Available_Seq1)
+        {
+            if (input.Type == App_Data_Available)
+            {
+                // app calls sending
+                // waiting for receiver's ACK
+                this.CachedForRetransmission = new TransportSegment(input.AppData, sequence_number: 1);
+                NetworkSend(this.CachedForRetransmission);
+
+                this.CurrentState = Waiting_Receiver_ACK_Seq1;
+                return;
+            }
+        }
+        else if (this.CurrentState == Waiting_Receiver_ACK_Seq1)
+        {
+            if (input.Type == Receiver_ACK_Available)
+            {
+                // receiver has sent ACK or NAK                
+                if (input.ReceiverSegment.IsAck() == true &&
+                    input.ReceiverSegment.IsCourrupted() == false)
+                {
+                    // wait for the next app's sending call
+                    this.CurrentState = Waiting_App_Data_Available_Seq0;
+                }
+                else if (
+                    input.ReceiverSegment.IsNak() == true ||
+                    input.ReceiverSegment.IsCorrupted() == true)
+                {
+                    // retransmit
+                    NetworkSend(this.CachedForRetransmission);
+                }
+            }
+        }
+    }
+}
+
+public class Receiver
+{
+    public State CurrentState = Waiting_Sender_Segment_Available_Seq0;
+
+    public void Transfer(Event input)
+    {
+        if (this.CurrentState == Waiting_Sender_Segment_Available_Seq0)
+        {
+            if (input.Type == Sender_Segment_Available)
+            {
+                if (input.SenderSegment.IsCorrupted() == true)
+                {
+                    // corrupted
+                    NetworkSend(new TransportSegment(NAK));
+                }
+                else
+                {
+                    // not corrupted
+
+                    // check sequence number
+                    if (input.SenderSegment.SequenceNumber == 0)
+                    {
+                        TransportDeliver(new AppData(input.SenderSegment));
+                        NetworkSend(new TransportSegment(ACK));
+
+                        this.CurrentState = Waiting_Sender_Segment_Available_Seq1;
+                    }
+                    else if (input.SenderSegment.SequenceNumber == 1)
+                    {
+                        // waiting for seq 0 but received seq 1
+                        NetworkSend(new TransportSegment(ACK));
+
+                    }
+                }
+            }
+        }
+        else if (this.CurrentState == Waiting_Sender_Segment_Available_Seq1)
+        {
+            if (input.Type == Sender_Segment_Available)
+            {
+                if (input.SenderSegment.IsCorrupted() == true)
+                {
+                    // corrupted
+                    NetworkSend(new TransportSegment(NAK));
+                }
+                else
+                {
+                    // not corrupted
+
+                    // check sequence number
+                    if (input.SenderSegment.SequenceNumber == 1)
+                    {
+                        TransportDeliver(new AppData(input.SenderSegment));
+                        NetworkSend(new TransportSegment(ACK));
+
+                        this.CurrentState = Waiting_Sender_Segment_Available_Seq0;
+                    }
+                    else if (input.SenderSegment.SequenceNumber == 0)
+                    {
+                        // waiting for seq 1 but received seq 0
+                        NetworkSend(new TransportSegment(ACK));
+                    }
+                }
+            }
+        }
+    }
+}
+```
 
 
 
