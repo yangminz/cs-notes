@@ -568,7 +568,8 @@ public class Sender
             {
                 // app calls sending
                 // waiting for receiver's ACK
-                this.CachedForRetransmission = new TransportSegment(input.AppData, sequence_number: 0);
+                this.CachedForRetransmission = new TransportSegment(
+                    input.AppData, sequence_number: 0);
                 NetworkSend(this.CachedForRetransmission);
 
                 this.CurrentState = Waiting_Receiver_ACK_Seq0;
@@ -692,6 +693,7 @@ public class Receiver
                     else if (input.SenderSegment.SequenceNumber == 0)
                     {
                         // waiting for seq 1 but received seq 0
+                        // yet seq 0 is already delivered to app process
                         NetworkSend(new TransportSegment(ACK));
                     }
                 }
@@ -701,9 +703,249 @@ public class Receiver
 }
 ```
 
+When an out-of-order packet is received, the receiver sends ACK if it's not corrupted. 
 
+Example
 
+```
++-------------------+-----------------------+---------------------------+---------------------------+-------------------+
+| sender app        | sender transport      | connection channel        | receiver transport        | receiver app      |
++-------------------+-----------------------+---------------------------+---------------------------+-------------------+
+|                   | seq0 wait for data1   |                           | seq0 wait for sender      | wait for data1    |
+|                   | seq0 wait for data1   |                           | seq0 wait for sender      | wait for data1    |
+| app data1 ready   | seq0 wait for ACK     | seq0, data1               | seq0 wait for sender      | wait for data1    |
+|                   | seq0 wait for ACK     |               seq0, data1 | seq0 wait for sender      | wait for data1    |
+|                   | seq0 wait for ACK     |                       ACK | seq1 wait for sender      | data1 delivered   |
+|                   | seq0 wait for ACK     | ACK                       | seq1 wait for sender      | wait for data2    |
++-------------------+-----------------------+---------------------------+---------------------------+-------------------+
+|                   | seq1 wait for data2   |                           | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for data2   |                           | seq1 wait for sender      | wait for data2    |
+| app data2 ready   | seq1 wait for ACK     | seq1, data2               | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     |     seq1, corrupted data2 | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     |                       NAK | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     | NAK                       | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     | seq1, data2               | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     |               seq1, data2 | seq1 wait for sender      | wait for data2    |
+|                   | seq1 wait for ACK     |                       ACK | seq0 wait for sender      | data2 delivered   |
+|                   | seq1 wait for ACK     | ACK                       | seq0 wait for sender      | wait for data3    |
++-------------------+-----------------------+---------------------------+---------------------------+-------------------+
+|                   | seq0 wait for data3   |                           | seq0 wait for sender      | wait for data3    |
+|                   | seq0 wait for data3   |                           | seq0 wait for sender      | wait for data3    |
+| app data3 ready   | seq0 wait for ACK     | seq0, data3               | seq0 wait for sender      | wait for data3    |
+|                   | seq0 wait for ACK     |               seq0, data3 | seq0 wait for sender      | wait for data3    |
+|                   | seq0 wait for ACK     |                       ACK | seq1 wait for sender      | data3 delivered   |
+|                   | seq0 wait for ACK     | corrupted ACK             | seq1 wait for sender      | wait for data4    |
+|                   | seq0 wait for ACK     | seq0, data3               | seq1 wait for sender      | wait for data4    |
+|                   | seq0 wait for ACK     |               seq0, data3 | seq1 wait for sender      | wait for data4    |
+|                   | seq0 wait for ACK     |                       ACK | seq1 wait for sender      | wait for data4    |
+|                   | seq0 wait for ACK     | ACK                       | seq1 wait for sender      | wait for data4    |
++-------------------+-----------------------+---------------------------+---------------------------+-------------------+
+|                   | seq1 wait for data4   |                           | seq1 wait for sender      | wait for data4    |
+```
 
+We can use ACK0 to replace ACK, ACK1 to replace NAK.
+
+#### Reliable Data Transfer over a Lossy Channel with Bit Errors: rdt3.0
+
+Now consider if the channel lose the packet as well. Solution: wait >= RTT so it's sure that the packet is lost, then retransmit.
+
+So for sender, retransmitting is also implemeted with a **countdown timer**. 
+
+### 3.4.2 Pipelined Reliable Data Transfer Protocols
+
+With timer, performance is poor because it's a stop-and-wait protocol. E.g. US East coast to West coast RTT is 30ms. 
+
+Solution: sender is allowed to send multiple packets without waiting for ACK. This is pipelining:
+
+1.  The range of sequence numbers is increased
+2.  The sender and receiver have to buffer more than one packet (`Sender.CachedForRetransmission`)
+3.  The above 2 are decided by how does the protocol responds to lost, corrupted, and overly delayed packets. 2 basic approaches: **Go-Back-N** and **selective repeat**.
+
+```
++---------------+---------------+---------------+
+| Sender        | 2-Channel     | Receiver      |
++---------------+---------------+---------------+
+| 1             |               |               |
+|               |               |               |
++---------------+---------------+---------------+
+| 2             | 1             |               |
+|               |               |               |
++---------------+---------------+---------------+
+| 3             | 2   1         |               |
+|               |               |               |
++---------------+---------------+---------------+
+| 4             | 3   2   1     |               |
+|               |               |               |
++---------------+---------------+---------------+
+| 5             | 4   3   2   1 |               | first bit of packet 1
+|               |               |               |
++---------------+---------------+---------------+
+| 6             | 5   4   3   2 | 1             | last bit of packet 1, first bit of packet 2
+|               |             1 |               | send ACK 1
++---------------+---------------+---------------+
+|               | 6   5   4   3 | 2 1           | last bit of packet 2, first bit of packet 3
+|               |         1   2 |               | send ACK 2
++---------------+---------------+---------------+
+|               |     6   5   4 | 3 2 1         | last bit of packet 3, first bit of packet 4
+|               |     1   2   3 |               | send ACK 3
++---------------+---------------+---------------+
+|               |         6   5 | 4 3 2 1       | last bit of packet 4, first bit of packet 5
+|               | 1   2   3   4 |               | send ACK 4
++---------------+---------------+---------------+
+|               |             6 | 5 4 3 2 1     | last bit of packet 5, first bit of packet 6
+|             1 | 2   3   4   5 |               | send ACK 5
++---------------+---------------+---------------+
+|               |               | 6 5 4 3 2 1   | last bit of packet 6
+|           1 2 | 3   4   5   6 |               | send ACK 6
++---------------+---------------+---------------+
+|               |               | 6 5 4 3 2 1   |
+|         1 2 3 | 4   5   6     |               |
++---------------+---------------+---------------+
+|               |               | 6 5 4 3 2 1   |
+|       1 2 3 4 | 5   6         |               |
++---------------+---------------+---------------+
+|               |               | 6 5 4 3 2 1   |
+|     1 2 3 4 5 | 6             |               |
++---------------+---------------+---------------+
+|               |               | 6 5 4 3 2 1   |
+|   1 2 3 4 5 6 |               |               |
++---------------+---------------+---------------+
+```
+
+### 3.4.3 Go-Back-N (GBN)
+
+In GBN protocol, sender is allowed to send multiple packets without ACK, but is constrained <= N unACKed packets in pipeline. 
+
+```
+Sequence Numbers:
+            base                    nextseqnum
++-----------+-----------------------+-----------------------+---------------+
+| ACKed     | Sent, not yet ACKed   | Usable, not yet sent  | Not usable    |
++-----------+-----------------------+-----------------------+---------------+
+| aaaaaaaaa | sssssssssssssssssssss | uuuuuuuuuuuuuuuuuuuuu | nnnnnnnnnnnnn |
++-----------+-----------------------+-----------------------+---------------+
+            \_______________________________________________/
+                            Window Size N
+```
+
+2 seq num pointers: `base` and `nextseqnum`. **Sliding window** with a fixed window size for flow control (TCP congestion control).
+
+```csharp
+public class Sender
+{
+    public int NextSeqNum;
+    public int Base;
+    public int WindowSize;
+    public TransportSegment[] Buffer;
+    public Timer SenderTimer;
+
+    public void Transfer(FsmInput input)
+    {
+        if (input.Type == App_Data_Available)
+        {
+            // add to send buffer
+            if (this.NextSeqNum < this.Base + this.WindowSize)
+            {
+                this.Buffer[this.NextSeqNum] = new TransportSegment(
+                    data: input.data,
+                    sequenceNum: this.NextSeqNum
+                );
+                NetworkSend(this.Buffer[this.NextSeqNum]);
+
+                if (this.Base == this.Next)
+                {
+                    this.SenderTimer.Start();
+                }
+                this.NextSeqNum += 1;
+            }
+            else
+            {
+                // app process should retry later
+                // in real world, this would be buffered or app can only call TcpSend()
+                // when the window is not full
+                RefuseAppData(input.AppProcess);
+            }
+        }
+        else if (this.SenderTimer.Timeout() == true)
+        {
+            this.SenderTimer.Start();
+            // retransmit all sent but not ACKed
+            for (int i = this.Base; i < this.NextSeqNum; ++ i)
+            {
+                NetworkSend(this.Buffer[i]);
+            }
+        }
+        else if (input.Type == Receiver_ACK_Available)
+        {
+            TransportSegment rcvpkt = input.ReceiverSegment;
+
+            if (rcvpkt.IsCorrupted() == true)
+            {
+                // do nothing
+                return;
+            }
+            else if (rcvpkt.IsCorrupted() == false)
+            {
+                // release ACK
+                this.Base = rcvpkt.SeqNum + 1;
+                if (this.Base == this.NextSeqNum)
+                {
+                    this.SenderTimer.Stop();
+                }
+                else
+                {
+                    this.SenderTimer.Start();
+                }
+            }
+        }
+    }
+}
+
+public class Receiver
+{
+    public int ExpectedSeqNum = 1;
+    public TransportSegment LastAckSegment = new TransportSegment(seqNum: 0, ACK);
+
+    public void Transfer(FsmInput input)
+    {
+        if (input.Type == Sender_Segment_Available)
+        {
+            // add to send buffer
+            if (input.SenderSegment.IsCorrupted() == false &&
+                input.SenderSegment.SeqNum == this.ExpectedSeqNum)
+            {
+                TransportDeliver(new AppData(input.SenderSegment));
+
+                this.LastAckSegment = new TransportSegment(seqNum: this.ExpectedSeqNum, ACK);
+                NetworkSend(this.LastAckSegment);
+                this.ExpectedSeqNum += 1;
+                return;
+            }
+        }
+        // all other cases, discards the received packet,
+        // resend ACK for last received sequence number
+        // to inform the sender that expected is not yet received
+        NetworkSend(this.LastAckSegment);
+    }
+}
+```
+
+In this GBN protocol, if receiver expects seqnum 10, but gets seqnum 15, though it's needed in future, it would be discarded and 15 should be retransmitted in future. So the data must be consumed **in order**.
+
+Event-based programming. FSM transfers when:
+
+1.  Call from App layer stack `send`, event = `AppDataAvailable`
+2.  Timer interrupt
+3.  Call from Ip layer `receive`, event = `SegmentAvailable`
+
+Takeaway:
+
+1.  Sequence numbers
+2.  Cumulative ACK
+3.  Checksum
+4.  Timeout/Retransmit operation
+
+### 3.4.4 Selective Repeat (SR)
 
 # Chapter 4 The Network Layer
 
