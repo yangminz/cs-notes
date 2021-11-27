@@ -425,45 +425,28 @@ Finite State Machine (FSM) defines rdt1.0 sender and receiver:
 ```csharp
 public class Sender
 {
-    public State CurrentState = Waiting_App_Data_Available;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
 
-    public void Transfer(FsmInput input)
+    // callbacks
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
     {
-        // no state change
-        if (input.Type == Waiting)
-        {
-            // still waiting
-            return;
-        }
-        else if (input.Type == App_Data_Available)
-        {
-            // app calls sending
-            // do the sending
-            NetworkSend(new TransportSegment(input.AppData));
-        }
+        this.NetworkClient.Send(
+            new TransportPacket(
+                data: e.AppData
+            ));
     }
 }
 
 public class Receiver
 {
-    public State CurrentState = Waiting_Sender_Segment_Available;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
 
-    public void Transfer(FsmInput input)
+    // callbacks
+    public void OnPacketReceived(object obj, PacketReceivedEventArgs e)
     {
-        if (this.CurrentState == Waiting_Sender_Segment_Available)
-        {
-            if (input.Type == Waiting)
-            {
-                // still waiting
-                return;
-            }
-            else if (input.Type == Sender_Segment_Available)
-            {
-                // app calls sending
-                // do the sending
-                TransportDeliver(new AppData(input.SenderSegment));
-            }
-        }
+        this.AppClient.Deliver(e.TransportPacket.AppData);
     }
 }
 ``` 
@@ -481,43 +464,49 @@ Retransmission if failed to ack: **Automatic Repeat ReQuest (ARQ) protocol**. Re
 ```csharp
 public class Sender
 {
-    public State CurrentState = Waiting_App_Data_Available;
-    public TransportSegment CachedForRetransmission;
+    public SenderState CurrentState = SenderState.WaitingAppData;
+    public TransportPacket CachedForRetransmission;
 
-    public void Transfer(FsmInput input)
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+
+    // callback
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
     {
-        if (this.CurrentState == Waiting_App_Data_Available)
+        if (this.CurrentState == WaitingAppData)
         {
-            if (input.Type == App_Data_Available)
-            {
-                // app calls sending
-                // waiting for receiver's ACK
-                this.CachedForRetransmission = new TransportSegment(input.AppData);
-                NetworkSend(this.CachedForRetransmission);
+            // app calls sending
+            // waiting for receiver's ACK
+            this.CachedForRetransmission = new TransportPacket(
+                data: e.AppData
+            );
+            this.NetworkClient.Send(this.CachedForRetransmission);
 
-                this.CurrentState = Waiting_Receiver_ACK;
-                return;
-            }
+            // state transfer
+            this.CurrentState = SenderState.WaitingAck;
         }
-        else if (this.CurrentState == Waiting_Receiver_ACK)
+        else
         {
-            if (input.Type == Receiver_ACK_Available)
+            this.AppClient.Reject(e.AppData);
+        }
+    }
+
+    // callback
+    public void OnAckReceived(object obj, AckReceivedEventArgs e)
+    {
+        if (this.CurrentState == SenderState.WaitingAck)
+        {
+            switch (e.ACK)
             {
-                // receiver has sent ACK or NAK                
-                if (input.ReceiverSegment.IsAck() == true)
-                {
-                    // receiver sends ACK
-                    // wait for the next app's sending call
-                    // unlocked
-                    this.CurrentState = Waiting_App_Data_Available;
-                }
-                else if (input.ReceiverSegment.IsNak() == true)
-                {
-                    // receiver sends NAK
+                case ACK:
+                    this.CurrentState = WaitingAppData;
+                    break;
+                case NAK:
                     // retransmit
-                    NetworkSend(this.CachedForRetransmission);
-                    // state is still waiting for receiver's ACK
-                }
+                    this.NetworkClient.Send(this.CachedForRetransmission);
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -525,26 +514,23 @@ public class Sender
 
 public class Receiver
 {
-    public State CurrentState = Waiting_Sender_Segment_Available;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
 
-    public void Transfer(Event input)
+    // callback
+    public void OnPacketReceived(object obj, PacketReceivedEventArgs e)
     {
-        if (this.CurrentState == Waiting_Sender_Segment_Available)
+        TransportPacket pkt = e.TransportPacket;
+
+        if (pkt.IsCorrupted() == true)
         {
-            if (input.Type == Sender_Segment_Available)
-            {
-                if (input.SenderSegment.IsCorrupted() == true)
-                {
-                    // corrupted
-                    NetworkSend(new TransportSegment(NAK));
-                }
-                else
-                {
-                    // not corrupted
-                    TransportDeliver(new AppData(input.SenderSegment));
-                    NetworkSend(new TransportSegment(ACK));
-                }
-            }
+            // corrupted
+            this.NetworkClient.SendNak();
+        }
+        else
+        {
+            this.AppClient.Deliver(pkt.AppData);
+            this.NetworkClient.SendAck();
         }
     }
 }
@@ -557,77 +543,67 @@ Problem for rdt2.0: what if ACK/NAK packet is corrupted? Add sequence number. Re
 ```csharp
 public class Sender
 {
-    public State CurrentState = Waiting_App_Data_Available_Seq0;
+    public State CurrentState = WaitingAppDataSeq0;
     public TransportSegment CachedForRetransmission;
 
-    public void Transfer(FsmInput input)
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+
+    // callback
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
     {
-        if (this.CurrentState == Waiting_App_Data_Available_Seq0)
+        if (this.CurrentState == WaitingAppDataSeq0)
         {
-            if (input.Type == App_Data_Available)
-            {
-                // app calls sending
-                // waiting for receiver's ACK
-                this.CachedForRetransmission = new TransportSegment(
-                    input.AppData, sequence_number: 0);
-                NetworkSend(this.CachedForRetransmission);
-
-                this.CurrentState = Waiting_Receiver_ACK_Seq0;
-                return;
-            }
+            // app calls sending
+            // waiting for receiver's ACK
+            this.CachedForRetransmission = new TransportPacket(
+                data: e.AppData,
+                seqNum: 0
+            );
+            this.NetworkClient.Send(this.CachedForRetransmission);
+            this.CurrentState = SenderState.WaitingAckSeq0;
         }
-        else if (this.CurrentState == Waiting_Receiver_ACK_Seq0)
+        else if (this.CurrentState == WaitingAppDataSeq1)
         {
-            if (input.Type == Receiver_ACK_Available)
+            this.CachedForRetransmission = new TransportPacket(
+                data: e.AppData,
+                seqNum: 1
+            );
+            this.NetworkClient.Send(this.CachedForRetransmission);
+            this.CurrentState = SenderState.WaitingAckSeq1;
+        }
+    }
+    
+    // callback
+    public void OnAckReceived(object obj, AckReceivedEventArgs e)
+    {
+        if (this.CurrentState == SenderState.WaitingAck0)
+        {
+            switch (e.ACK)
             {
-                // receiver has sent ACK or NAK                
-                if (input.ReceiverSegment.IsAck() == true)
-                {
-                    // receiver sends ACK
-                    // wait for the next app's sending call
-                    // unlocked
-                    this.CurrentState = Waiting_Receiver_ACK_Seq1;
-                }
-                else if (input.ReceiverSegment.IsNak() == true)
-                {
-                    // receiver sends NAK
+                case ACK:
+                    this.CurrentState = WaitingAppData1;
+                    break;
+                case NAK:
                     // retransmit
-                    NetworkSend(this.CachedForRetransmission);
-                    // state is still waiting for receiver's ACK
-                }
+                    this.NetworkClient.Send(this.CachedForRetransmission);
+                    break;
+                default:
+                    break;
             }
         }
-        if (this.CurrentState == Waiting_App_Data_Available_Seq1)
+        else if (this.CurrentState == SenderState.WaitingAck1)
         {
-            if (input.Type == App_Data_Available)
+            switch (e.ACK)
             {
-                // app calls sending
-                // waiting for receiver's ACK
-                this.CachedForRetransmission = new TransportSegment(input.AppData, sequence_number: 1);
-                NetworkSend(this.CachedForRetransmission);
-
-                this.CurrentState = Waiting_Receiver_ACK_Seq1;
-                return;
-            }
-        }
-        else if (this.CurrentState == Waiting_Receiver_ACK_Seq1)
-        {
-            if (input.Type == Receiver_ACK_Available)
-            {
-                // receiver has sent ACK or NAK                
-                if (input.ReceiverSegment.IsAck() == true &&
-                    input.ReceiverSegment.IsCourrupted() == false)
-                {
-                    // wait for the next app's sending call
-                    this.CurrentState = Waiting_App_Data_Available_Seq0;
-                }
-                else if (
-                    input.ReceiverSegment.IsNak() == true ||
-                    input.ReceiverSegment.IsCorrupted() == true)
-                {
-                    // retransmit
-                    NetworkSend(this.CachedForRetransmission);
-                }
+                case ACK:
+                    this.CurrentState = WaitingAppData0;
+                    break;
+                case NAK:
+                    this.NetworkClient.Send(this.CachedForRetransmission);
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -635,67 +611,59 @@ public class Sender
 
 public class Receiver
 {
-    public State CurrentState = Waiting_Sender_Segment_Available_Seq0;
+    public ReceiverState CurrentState = ReceiverState.WaitingSenderPacketSeq0;
 
-    public void Transfer(Event input)
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+
+    // callback
+    public void OnPacketReceived(object obj, PacketReceivedEventArgs e)
     {
-        if (this.CurrentState == Waiting_Sender_Segment_Available_Seq0)
+        TransportPacket pkt = e.TransportPacket;
+
+        if (pkt.IsCorrupted() == true)
         {
-            if (input.Type == Sender_Segment_Available)
+            // corrupted
+            this.NetworkClient.SendNak();
+        }
+        else
+        {
+            int pktSeqNum = pkt.SeqNum;
+
+            if (this.CurrentState == ReceiverState.WaitingSenderPacketSeq0)
             {
-                if (input.SenderSegment.IsCorrupted() == true)
+                switch (pktSeqNum)
                 {
-                    // corrupted
-                    NetworkSend(new TransportSegment(NAK));
-                }
-                else
-                {
-                    // not corrupted
-
-                    // check sequence number
-                    if (input.SenderSegment.SequenceNumber == 0)
-                    {
-                        TransportDeliver(new AppData(input.SenderSegment));
-                        NetworkSend(new TransportSegment(ACK));
-
-                        this.CurrentState = Waiting_Sender_Segment_Available_Seq1;
-                    }
-                    else if (input.SenderSegment.SequenceNumber == 1)
-                    {
-                        // waiting for seq 0 but received seq 1
-                        NetworkSend(new TransportSegment(ACK));
-
-                    }
+                    case 0:
+                        // waiting for 0 and get 0
+                        this.AppClient.Deliver(pkt.AppData);
+                        this.NetworkClient.SendAck();
+                        this.CurrentState = ReceiverState.WaitingSenderPacketSeq1;
+                        break;
+                    case 1:
+                        // waiting for 0 but get 1
+                        this.NetworkClient.SendNak();
+                        break;
+                    default:
+                        break;
                 }
             }
-        }
-        else if (this.CurrentState == Waiting_Sender_Segment_Available_Seq1)
-        {
-            if (input.Type == Sender_Segment_Available)
+            else if (this.CurrentState == ReceiverState.WaitingSenderPacketSeq1)
             {
-                if (input.SenderSegment.IsCorrupted() == true)
+                switch (pktSeqNum)
                 {
-                    // corrupted
-                    NetworkSend(new TransportSegment(NAK));
-                }
-                else
-                {
-                    // not corrupted
-
-                    // check sequence number
-                    if (input.SenderSegment.SequenceNumber == 1)
-                    {
-                        TransportDeliver(new AppData(input.SenderSegment));
-                        NetworkSend(new TransportSegment(ACK));
-
-                        this.CurrentState = Waiting_Sender_Segment_Available_Seq0;
-                    }
-                    else if (input.SenderSegment.SequenceNumber == 0)
-                    {
-                        // waiting for seq 1 but received seq 0
-                        // yet seq 0 is already delivered to app process
-                        NetworkSend(new TransportSegment(ACK));
-                    }
+                    case 0:
+                        // waiting for 1 but get 0
+                        this.NetworkClient.SendNak();
+                        break;
+                    case 1:
+                        // waiting for 1 and get 1
+                        this.AppClient.Deliver(pkt.AppData);
+                        this.NetworkClient.SendAck();
+                        this.CurrentState = ReceiverState.WaitingSenderPacketSeq0;
+                        break;
+                    default:
+                        break;
                 }
             }
         }
@@ -833,69 +801,73 @@ Sequence Numbers:
 ```csharp
 public class Sender
 {
+    public int BaseSeqNum;
     public int NextSeqNum;
-    public int Base;
     public int WindowSize;
-    public TransportSegment[] Buffer;
-    public Timer SenderTimer;
+    public IndexedQueue<TransportPacket> Window;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+    public TransportPacket AckedPlaceHolderSingleton;
+    public ITimer InternalTimer;
 
-    public void Transfer(FsmInput input)
+    // callback
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
     {
-        if (input.Type == App_Data_Available)
-        {
-            // add to send buffer
-            if (this.NextSeqNum < this.Base + this.WindowSize)
-            {
-                this.Buffer[this.NextSeqNum] = new TransportSegment(
-                    data: input.data,
-                    sequenceNum: this.NextSeqNum
-                );
-                NetworkSend(this.Buffer[this.NextSeqNum]);
+        var data = e.AppData;
 
-                if (this.Base == this.Next)
-                {
-                    this.SenderTimer.Start();
-                }
-                this.NextSeqNum += 1;
+        if (this.NextSeqNum < this.BaseSeqNum + this.WindowSize)
+        {
+            var pkt = new TransportPacket(
+                seqNum: this.NextSeqNum,
+                data: data
+            );
+
+            // Add this sent packet to buffer
+            this.Window.SetByIndex(
+                index: this.NextSeqNum - this.BaseSeqNum,
+                value: pkt);
+
+            this.NetworkClient.Send(pkt);
+
+            if (this.BaseSeqNum == this.NextSeqNum)
+            {
+                this.InternalTimer.Start();
+            }
+
+            this.NextSeqNum += 1;
+        }
+        else
+        {
+            // app process should retry later
+            // in real world, this would be buffered or app can only call TcpSend()
+            // when the window is not full
+            this.AppClient.Reject(data);
+        }
+    }
+    
+    public void OnTimeout(object obj, PacketAckTimeoutEventArgs e)
+    {
+        // retransmit all sent but not ACKed
+        for (int i = this.BaseSeqNum; i < this.NextSeqNum; ++ i)
+        {
+            this.NetworkClient.Send(this.Window.GetByIndex(i));
+        }
+        this.InternalTimer.Start();
+    }
+
+    public void OnAckReceived(object obj, AckReceivedEventArgs e)
+    {
+        if (e.Ack.IsCorrupted() == false)
+        {
+            this.BaseSeqNum = e.Ack.SeqNum + 1;
+            
+            if (this.BaseSeqNum == this.NextSeqNum)
+            {
+                this.InternalTimer.Stop();
             }
             else
             {
-                // app process should retry later
-                // in real world, this would be buffered or app can only call TcpSend()
-                // when the window is not full
-                RefuseAppData(input.AppProcess);
-            }
-        }
-        else if (this.SenderTimer.Timeout() == true)
-        {
-            this.SenderTimer.Start();
-            // retransmit all sent but not ACKed
-            for (int i = this.Base; i < this.NextSeqNum; ++ i)
-            {
-                NetworkSend(this.Buffer[i]);
-            }
-        }
-        else if (input.Type == Receiver_ACK_Available)
-        {
-            TransportSegment rcvpkt = input.ReceiverSegment;
-
-            if (rcvpkt.IsCorrupted() == true)
-            {
-                // do nothing
-                return;
-            }
-            else if (rcvpkt.IsCorrupted() == false)
-            {
-                // release ACK
-                this.Base = rcvpkt.SeqNum + 1;
-                if (this.Base == this.NextSeqNum)
-                {
-                    this.SenderTimer.Stop();
-                }
-                else
-                {
-                    this.SenderTimer.Start();
-                }
+                this.InternalTimer.Start();
             }
         }
     }
@@ -904,28 +876,30 @@ public class Sender
 public class Receiver
 {
     public int ExpectedSeqNum = 1;
-    public TransportSegment LastAckSegment = new TransportSegment(seqNum: 0, ACK);
+    public AckPackage LastAck = new AckPackage(seqNum: 0);
 
-    public void Transfer(FsmInput input)
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+
+    // callback
+    public void OnPacketReceived(object obj, PacketReceivedEventArgs e)
     {
-        if (input.Type == Sender_Segment_Available)
-        {
-            // add to send buffer
-            if (input.SenderSegment.IsCorrupted() == false &&
-                input.SenderSegment.SeqNum == this.ExpectedSeqNum)
-            {
-                TransportDeliver(new AppData(input.SenderSegment));
+        TransportPacket pkt = e.Packet;
 
-                this.LastAckSegment = new TransportSegment(seqNum: this.ExpectedSeqNum, ACK);
-                NetworkSend(this.LastAckSegment);
-                this.ExpectedSeqNum += 1;
-                return;
-            }
+        if (pkt.IsCorrupted() == false &&
+            pkt.SeqNum == this.ExpectedSeqNum)
+        {
+            this.AppClient.Deliver(pkt.AppData);
+
+            this.LastAck = new AckPackage(seqNum: this.ExpectedSeqNum);
+            this.ExpectedSeqNum += 1;
         }
+
+        // send the updated ACK if it's not corrupted
         // all other cases, discards the received packet,
         // resend ACK for last received sequence number
         // to inform the sender that expected is not yet received
-        NetworkSend(this.LastAckSegment);
+        this.NetworkClient.Send(this.LastAck);
     }
 }
 ```
@@ -946,6 +920,180 @@ Takeaway:
 4.  Timeout/Retransmit operation
 
 ### 3.4.4 Selective Repeat (SR)
+
+GBN still has perf problems, when window size * bandwidth-delay is large: a single packet error will cause many packets being retransmitted. so SR retransmits only the possible error or lost packets. 
+
+```
+Sender:
+            base                    nextseqnum
++-----------+-----------------------+-----------------------+---------------+
+| ACKed     | Sent, not yet ACKed   | Usable, not yet sent  | Not usable    |
++-----------+-----------------------+-----------------------+---------------+
+| aaaaaaaaa | ss a ssss aaa s a ss | uuuuuuuuuuuuuuuuuuuuu | nnnnnnnnnnnnn |
++-----------+-----------------------+-----------------------+---------------+
+            \_______________________________________________/
+                            Window Size N
+```
+
+range `[base: nextseqnum]`: some are ACKed, some are not. 
+
+Receiver ACKs a received packet (it can be out-of-order). The out-of-order packets are buffered until seqnum < out-of-order packet is received, when the batch can be delivered. 
+
+```csharp
+public class Receiver
+{
+    public int BaseSeqNum;
+    public int WindowSize;
+    public IndexedQueue<TransportPacket> Window;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+
+    // callback
+    public void OnPacketReceived(object obj, PacketReceivedEventArgs e)
+    {
+        TransportPacket pkt = e.Packet;
+        
+        if (pkt.IsCorrupted() == false)
+        {
+            if (this.BaseSeqNum <= pkt.SeqNum && 
+                pkt.SeqNum < this.BaseSeqNum + this.WindowSize)
+            {
+                // the received packet is in the window
+                // may or may not send ACK
+                if (pkt.SeqNum == this.BaseSeqNum)
+                {
+                    // Window[base] must be null, so ACK is needed
+                    this.NetworkClient.Send(new AckPacket(pkt.SeqNum));
+
+                    // deliver the cached prefix
+                    while (this.Window.Peek() != null)
+                    {
+                        // not-null means this packet has been cached (ACKed) previously
+                        TransportPacket q = this.Window.Dequeue();
+                        // maintain the window size is not changed
+                        this.Window.Enqueue(null);
+                        // maintain the pointer
+                        this.BaseSeqNum += 1;
+
+                        this.AppClient.Deliver(q.AppData);
+                    }
+
+                    return;
+                }
+
+                // check if this packet is cached before (position [seqnum])
+                int index = pkt.SeqNum - this.BaseSeqNum;
+                if (this.Window.GetByIndex(index: index) == null)
+                {
+                    // cache it
+                    this.Window.SetByIndex(index: index, value: pkt);
+                    this.NetworkClient.Send(new AckPacket(pkt.SeqNum));
+                    return;
+                }
+                
+                // here means the packet is not base and it's cached, no ACK for it
+            }
+            else if (this.BaseSeqNum - this.WindowSize <= pkt.SeqNum && 
+                pkt.SeqNum < this.BaseSeqNum)
+            {
+                /*  it's in previous window, delivered to application 
+                    ACK is still needed even it has been ACKed. 
+                    Because the receiver window and sender window may different
+                    BUT !! receiver.BaseSeqNum must be in sender's window !!
+                    Sender:     a-----------c--------------b
+                    Receiver:               c------------------------d
+                    the range sender[a : c] may still not receive ACK, 
+                    though receiver has sent them.
+                    These ACK may lost, sender retransmits these packets [a : c].
+                    That's why receiver is receiving them
+                    so receiver need to ACK them again for sender's good
+                 */
+                this.NetworkClient.Send(new AckPacket(pkt.SeqNum));
+                return;
+            }
+        }
+
+        // ignore the packet in all other cases
+    }
+}
+
+public class Sender
+{
+    public int BaseSeqNum;
+    public int NextSeqNum;
+    public int WindowSize;
+    public IndexedQueue<TransportPacket> Window;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+    public TransportPacket AckedPlaceHolderSingleton;
+
+    // callback
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
+    {
+        var data = e.AppData;
+
+        if (this.NextSeqNum < this.BaseSeqNum + this.WindowSize)
+        {
+            var pkt = new TransportPacket(
+                seqNum: this.NextSeqNum,
+                data: data
+            );
+            pkt.InternalTimer.Start();
+
+            // Add this sent packet to buffer
+            this.Window.SetByIndex(
+                index: this.NextSeqNum - this.BaseSeqNum,
+                value: pkt);
+
+            this.NetworkClient.Send(pkt);
+            this.NextSeqNum += 1;
+        }
+        else
+        {
+            this.AppClient.Reject(data);
+        }
+    }
+
+    // callback
+    public void OnTimeout(object obj, PacketAckTimeoutEventArgs e)
+    {
+        // each packet has it's own logical timer
+        // so this timeout is only for a single packet
+        // retransmit for this packet
+        this.NetworkClient.Send(e.Packet);
+        e.Packet.InternalTimer.Start();
+    }
+
+    // callback
+    public void OnAckReceived(object obj, AckReceivedEventArgs e)
+    {
+        if (e.Ack.IsCorrupted() == false)
+        {
+            int ackSeqNum = e.Ack.SeqNum;
+
+            this.Window.SetByIndex(
+                index: ackSeqNum - this.BaseSeqNum, 
+                value: this.AckedPlaceHolderSingleton);
+            
+            while (this.Window.Peek() == this.AckedPlaceHolderSingleton)
+            {
+                // so the window size is not changed
+                this.Window.Dequeue();
+                this.Window.Enqueue(null);
+                this.BaseSeqNum += 1;
+            }
+        }
+        // for corrupted ACK, receiver has delivered app data
+        // but sender will wait for timeout and retransmit
+        // so the retransmitted package may be in [a : c]
+        // receiver resend ACK for it
+    }
+}
+```
+
+Real world: packets may be reordered.
+
+## 3.5 Connection-Oriented Transport: TCP
 
 # Chapter 4 The Network Layer
 
