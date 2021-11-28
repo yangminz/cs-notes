@@ -1095,6 +1095,506 @@ Real world: packets may be reordered.
 
 ## 3.5 Connection-Oriented Transport: TCP
 
+RFC 793, RFC 1122, RFC 1323, RFC 2018, and RFC 2581
+
+### 3.5.1 The TCP Connection
+
+Connection-oriented: before transfer data, 2 processes must first handshake with each other to send preliminary segments to each other to establish parameters.
+
+TCP only runs in end system, intermediate network do not maintain TCP connection state.
+
+**Full-duplex Service**:  A <---> X, B <---> X ===> A <---> B
+
+**Point-to-point**: single sender & single receiver.
+
+RFC793 did not specify the delivery timing. The max amount of data can be placed in segment is limited by _maximum segment size (MSS)_, determined by largest link-layer frame.
+
+Takeaway: TCP contains:
+
+1.  Buffers (sender role and receiver role)
+2.  Variables
+3.  Socket connection to a process in one host
+4.  These TCP states does not exist in network layer (routers, switches, repeaters)
+
+
+### 3.5.2 TCP Segment Structure
+
+```cpp
+typedef struct
+{
+    // the source port number
+    uint16_t    source_port_number;
+    // the destination port number
+    uint16_t    destination_port_number;
+
+    // the sequence number for reliable data transfer
+    uint32_t    sequence_number;
+    // the ack number for reliable data transfer
+    uint32_t    acknowledgement_number;
+    
+    // the header length in 32-bit words. Due to option fields,
+    // the header length can varies, <= 16 * 32bits = 64Bytes
+    // typically, options are empty so 20 bytes, record 5
+    uint4_t     header_length;
+
+    // unused
+    uint8_t     unused: 6;
+
+    // flags total 6 bits
+
+    // if there is data that sending app data as urgent
+    uint8_t     urg_bit: 1;
+    // if the value caried in acknowledgement_number is valid
+    uint8_t     ack_bit: 1;
+    // if the receiver should pass data to app layer immediately
+    uint8_t     psh_bit: 1;
+    // rst, sync, fin are used for connection setup and teardown
+    uint8_t     rst_bit: 1;
+    uint8_t     syn_bit: 1;
+    uint8_t     fin_bit: 1;
+
+    // used for flow control
+    uint16_t    receiver_window;
+
+    // the checksum
+    uint16_t    internet_checksum;
+
+    // pointer to the urgent data, cowork with urg_bit
+    uint16_t    urgent data pointer;
+
+    uint32_t    options;
+}
+```
+
+#### Sequence Numbers and Acknowledgment Numbers
+
+Most critical fields: sequence number and ack number, for reliable data transfer service.
+
+Data in TCP: unstructured, ordered, stream of bytes. _SeqNum for a segment_ is the byte-stream number of the first byte in segment.
+
+Example: send 500,000 bytes, MSS = 1,000 bytes ==> 500 segments.
+
+```
+segment[0].seqNum = 0
+segment[1].seqNum = 1,000
+segment[2].seqNum = 2,000
+...
+```
+
+ACK number Example:
+
+Host A received all bytes seqNum `0 : 535` from B, waiting for byte `536`. A is going to send a new segment, send `ackNum: 536` to B.
+
+Another example. A received byte `[0, 535]` and `[900, 1000]` from B, but not `[536, 899]`. A waiting for `536`. Then A's next segment to B will contains `ackNum: 536` to B so B knows `[0, 535]` is received. 
+
+**Cumulative Acknowledgement**: TCP only ACKs bytes up to the first missing byte in the stream.
+
+And for the out-of-order segment `[900, 1000]`, RFC has not defined required actions for it. 2 choices:
+
+1.  Discard the out-of-order segment
+2.  Receiver maintains a buffer and waiting for the missing bytes. This is taken in practice to reduce network bandwidth.
+
+Initial seqnum is randomly selected to reduce collision.
+
+### 3.5.3 Round-Trip Time Estimation and Timeout
+
+TCP use timeout/retransmit to recover from lost segments. Timeout > RTT. So TCP needs to estimate RTT.
+
+```
+SampleRTT = T(ACK of seg[i] is received) - T(seg[i] is sent)
+```
+
+Only compute `SampleRtt` for segments that have been transmitted once. Use `SampleRtt` to calculate `EstimatedRtt` (weighted average):
+
+```
+EstimatedRtt = (1 - a) * EstimatedRtt + a * SampleRtt
+```
+
+`a=0.125` is recommended. 
+
+And the variability of RTT:
+
+```
+DevRtt = (1 - b) * DevRtt + b * ABS(SampleRtt - EstimatedRtt)
+```
+
+`b = 0.25` is recommanded.
+
+With expectation and variability, timeout interval is calculated as:
+
+```
+TimeoutInterval = EstimatedRtt + 4 * DevRtt
+```
+
+The init value of `TimeoutInterval` is 1 second. When timeout, double the timeout interval to avoid premature timeout. When the segment is received, compute the interval using the formula above.
+
+### 3.5.4 Reliable Data Transfer
+
+TCP builds reliability on top of IP. 
+
+RFC 6298 recommends use **only one retransmission timer** even there are multiple unACKed segments.
+
+Simplified TCP sender:
+
+```csharp
+public class Sender
+{
+    public int BaseSeqNum;
+    public int NextSeqNum;
+    public int WindowSize;
+    public Queue<TransportPacket> UnAcked;
+    public INetworkLayerClient NetClient;
+    public IApplicationLayerClient AppClient;
+    public TransportPacket AckedPlaceHolderSingleton;
+    public ITimer InternalTimer;
+
+    // callback
+    public void OnAppDataReceived(object obj, AppDataReceivedEventArgs e)
+    {
+        var data = e.AppData;
+        int m = this.NextSeqNum + data.ByteSize;
+
+        if (m < this.BaseSeqNum + this.WindowSize)
+        {
+            var pkt = new TransportPacket(
+                seqNum: this.NextSeqNum,
+                data: data
+            );
+
+            if (this.InternalTimer.IsStopped())
+            {
+                // so the timer works for the oldest packet
+                this.InternalTimer.Start();
+            }
+
+            // Add this sent packet to buffer
+            this.UnAcked.Enqueue(pkt);
+
+            this.NetworkClient.Send(pkt);
+            this.NextSeqNum = m;
+        }
+        else
+        {
+            this.AppClient.Reject(data);
+        }
+    }
+
+    // callback
+    public void OnTimeout(object obj, PacketAckTimeoutEventArgs e)
+    {
+        if (this.UnAcked.IsEmpty() == false)
+        {
+            // retransmit the oldest
+            this.NetworkClient.Send(this.UnAcked.Peek());
+            this.InternalTimer.Start();            
+        }
+    }
+
+    // callback
+    public void OnAckReceived(object obj, AckReceivedEventArgs e)
+    {
+        if (e.Ack.IsCorrupted() == false)
+        {
+            int ackNum = e.AckNum;
+
+            if (ackNum > this.BaseSeqNum)
+            {
+                this.BaseSeqNum = ackNum;
+
+                while (this.UnAcked.Peek().SeqNum < ackNum)
+                {
+                    // ACKed
+                    this.UnAcked.Dequeue();
+                }
+            }
+
+            if (this.UnAcked.IsEmpty() == false)
+            {
+                this.InternalTimer.Start();
+            }
+        }
+    }
+}
+```
+
+A Few Interesting Scenarios
+
+Case 1
+
+```
+Host A:
+1.  Send seq = 92, data size = 8
+    waiting for ACK = 100
+
+2.  seq = 92 timeout
+    Resend seq = 92, data size = 8
+    waiting for ACK = 100
+
+3.  Receive ACK = 100
+```
+
+In this case, when timeout, Host A thinks: (1) Segment 92 is lost or (2) ACK 100 is lost. Retransmit segment 92.
+
+Case 2
+
+```
+Host A:
+1.  Send seq = 92, data size = 8
+    waiting for ACK = 100
+
+2.  Send seq = 100, data size = 20
+    waiting for ACK = 120
+
+3.  seq = 92 timeout
+    Resend seq = 92, data size = 8
+    waiting for ACK = 120 (120 > 100)
+    Restart seq = 92 timer
+
+4.  Receive ACK = 120
+
+---------------------------------------------
+
+Host B:
+1.  Receive seq = 92, data size = 8
+    send ACK = 100 (92 + 8)
+
+2.  Receive seq = 100, data size = 20
+    send ACK = 120 (100 + 20)
+
+3.  Receive seq = 92, data size = 8
+    resend ACK = 120 (120 > 100)
+```
+
+When host A receives ACK 120 in second timeout window, knows that seq=100 and seq=120 are all received (100 < 120).
+
+When host B receives seq=92 again, B knows ACK=100 is lost. But it has sent ACK=100 and ACK=120, so resend ACK=max(120, 100).
+
+Case 3
+
+```
+Host A:
+1.  Send seq = 92, data size = 8
+    seq = 92 timer starts
+    waiting for ACK = 100
+
+2.  Send seq = 100, data size = 20
+    waiting for ACK = 120
+
+3.  Receive ACK = 120
+
+4.  seq = 92 timeout
+
+----------------------------------
+
+Host B:
+
+1.  Receive seq = 92, data size = 8
+    send ACK = 100
+
+2.  Receive seq = 100, data size = 120
+    send ACK = 120
+```
+
+Host A in step 3 knows the 100, 120 are both ACKed, but `ACK = 100` may lost.
+
+#### Fast Retransmit
+
+Avoid waiting for timeout to find that the packet is lost. **Duplicated ACK**:
+
+```
+Host A:
+
+1.  Send seq = 92, data size = 8
+    waiting for ACK = 100
+
+2.  Send seq = 100, data size = 20
+    waiting for ACK = 120
+
+3.  Send seq = 120, data size = 15
+    waiting for ACK = 135
+
+4.  Send seq = 135, data size = 6
+    waiting for ACK = 141
+
+5.  Send seq = 141, data size = 16
+    waiting for ACK = 157
+
+6.  Receive ACK = 100
+    seq = 100 timer starts
+
+7.  Receive ACK = 100   // 1st duplicate, host A knows seq = 100 may be lost or in the way
+
+8.  Receive ACK = 100   // 2nd duplicate
+
+9.  Receive ACK = 100   // 3rd duplicate, fast retransmit
+    Resend seq = 100, data size = 20
+
+10.  seq = 100 timeout
+
+-----------------------------------
+
+Host B:
+
+1.  Receive seq = 92, data size = 8
+    Send ACK = 100
+
+2.  Receive seq = 120, data size = 15
+    Send ACK = 100
+    // receiver finds a hole [100 : 119]
+
+3.  Receive seq = 120, data size = 15
+    Send ACK = 100
+
+4.  Receive seq = 132, data size = 6
+    Send ACK = 100
+
+4.  Receive seq = 141, data size = 16
+    Send ACK = 100
+```
+
+RFC 5681:
+
+1.  When: Arrival of in-order segment with expected sequence number. All data up to expected sequence number already acknowledged.
+
+Receiver: Delayed ACK. Wait up to 500 msec for arrival of another in-order segment. If next in-order segment does not arrive in this interval, send an ACK.
+
+2.  When: Arrival of in-order segment with expected sequence number. One other in-order segment waiting for ACK transmission.
+
+Receiver: Immediately send single cumulative ACK, ACKing both in-order segments.
+
+3.  When: Arrival of out-of-order segment with higher-than-expected sequence number. Gap detected.
+
+Receiver: Immediately send duplicate ACK, indicating sequence number of next expected byte (which is the lower end of the gap).
+
+4. When: Arrival of segment that partially or completely fills in gap in received data.
+
+Receiver: Immediately send ACK, provided that segment starts at the lower end of gap.
+
+When receiver finds a missing segment (`[A+1,B-1]`) in the data stream, receiver send the ACK for the last in-order byte of data (`A`):
+
+```
+                    A        B
+seq num: xxxxxxxxxxxx________xxxxxxxx
+```
+
+Fast retransmit: resend the missing segment before that segment's timer expires. 
+
+TCP's error-recovery is a hybrid of GBN and SR.
+
+### 3.5.5 Flow Control
+
+Each side of TCP maintains a buffer to reorder the packets. Sender may overflow the receiver's buffer -- **Flow-Control Service** -- match the 2 speeds:
+
+1.  Sender's sending speed
+2.  App's reading speed
+
+**Congestion Control**: sender may be throttled within IP network. Different flow control.
+
+Suppose receiver discards out-out-order segments.
+
+Use _receiver window_ to do flow control. With this from TCP header, sender can know how much free buffer space is still available at receiver.
+
+```
+Data flow from IP
+
++===============+ \-----------------\   
+|               |  |                 |  rwnd = RcvBuffer -
+| usable space  |  | receive window  |      (LastByteRcvd - LastByteRead)
+|               |  | rwnd            |
++---------------+ /                  |  <---- LastByteRcvd
+|               |                    |
+| TCP used      |                    | 
+|               |                    |
++===============+  -----------------/   <---- LastByteRead
+                    receive buffer
+                    RcvBuffer
+Application Process
+```
+
+So we have
+
+```
+rwnd := RcvBuffer - (LastByteRcvd - LastByteRead) >= 0
+```
+
+Initially, `rwnd := RcvBuffer`. 
+
+Sender keeps 2 variables: `LastByteSent, LastByteAcked`. So `LastByteSent - LastByteAcked` is the size of unAcked data. We have: `LastByteSent - LastByteAcked` <= the packets receiver will receive (packet may be lost) = receiver will ACKed. 
+
+If:
+
+```
+LastByteSent - LastByteAcked <= rwnd
+```
+
+Then the buffer will not overflow.
+
+But one problem: Host B's receive window is `0`, host A now waiting the receive window become positive. But if B do not send packet to A, even the receive buffer is emptied, host A will not know, host A will be blocked.
+
+So host A needs to send _one byte_ when B's receive window is zero. 
+
+UDP does not have flow control: a finite-sized buffer. Just drop when overflow.
+
+### 3.5.6 TCP Connection Management
+
+3-way handshake
+
+1.  client sends a special segment to server. Set `syn_bit = 1`, so it's named `SYN` segment. And a random initial seq number. 
+    ```csharp
+    new TcpSegment (
+        SYN: 1, 
+        SeqNum: client_isn
+    )
+    ```
+2.  server extracts `SYN` segment from datagram, allocates TCP buffers and variables for connection. Then server send `SYNACK` segment:
+    ```csharp
+    new TcpSegment(
+        SYN: 1, 
+        AckNum: client_isn + 1,
+        SeqNum: server_isn,
+    )
+    ```
+3.  client receives `SYNACK` from server, client allocates buffer & variables. client sends:
+    ```csharp
+    new TcpSegment(
+        SYN: 0, 
+        AckNum: server_isn + 1,
+        SeqNum: client_isn + 1,
+        Data: appData
+    )
+    ```
+
+The following segments will set `SYN = 0`.
+
+4-way closing
+
+```
+Client (ESTABLISHED):
+
+1.  Closes the connection. Send FIN to server, ESTABLISHED --> FIN_WAIT_1
+
+2.  Receives ACK for FIN, do nothing, FIN_WAIT_1 --> FIN_WAIT_2, waiting for server's FIN
+
+3.  Receives FIN from server, send ACK for this FIN, FIN_WAIT_2 --> TIME_WAIT, wait for 30 seconds
+
+4.  Time to 30 seconds, TIME_WAIT --> CLOSED
+
+---------------------------------------
+
+Server (ESTABLISHED):
+
+1.  Receives FIN from client, send ACK, ESTABLISHED --> CLOSE_WAIT, do the closing work
+
+2.  Close the connection, send FIN to client, waiting for client's ACK for this FIN, CLOSE_WAIT --> LAST_ACK
+
+3.  ACK received, LAST_ACK --> CLOSED
+```
+
+When host receives segment with destination port 80, while host is not accepting connections on port 80, host will send segment with `RST` flag back. 
+
+## 3.6 Principles of Congestion Control
+
+
 # Chapter 4 The Network Layer
 
 # Chapter 8 Security in Computer Networks
