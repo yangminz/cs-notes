@@ -1454,21 +1454,21 @@ Host B:
 
 RFC 5681:
 
-1.  When: Arrival of in-order segment with expected sequence number. All data up to expected sequence number already acknowledged.
+**When**: Arrival of in-order segment with expected sequence number. All data up to expected sequence number already acknowledged.
 
-Receiver: Delayed ACK. Wait up to 500 msec for arrival of another in-order segment. If next in-order segment does not arrive in this interval, send an ACK.
+**Receiver**: Delayed ACK. Wait up to 500 msec for arrival of another in-order segment. If next in-order segment does not arrive in this interval, send an ACK.
 
-2.  When: Arrival of in-order segment with expected sequence number. One other in-order segment waiting for ACK transmission.
+**When**: Arrival of in-order segment with expected sequence number. One other in-order segment waiting for ACK transmission.
 
-Receiver: Immediately send single cumulative ACK, ACKing both in-order segments.
+**Receiver**: Immediately send single cumulative ACK, ACKing both in-order segments.
 
-3.  When: Arrival of out-of-order segment with higher-than-expected sequence number. Gap detected.
+**When**: Arrival of out-of-order segment with higher-than-expected sequence number. Gap detected.
 
-Receiver: Immediately send duplicate ACK, indicating sequence number of next expected byte (which is the lower end of the gap).
+**Receiver**: Immediately send duplicate ACK, indicating sequence number of next expected byte (which is the lower end of the gap).
 
-4. When: Arrival of segment that partially or completely fills in gap in received data.
+**When**: Arrival of segment that partially or completely fills in gap in received data.
 
-Receiver: Immediately send ACK, provided that segment starts at the lower end of gap.
+**Receiver**: Immediately send ACK, provided that segment starts at the lower end of gap.
 
 When receiver finds a missing segment (`[A+1,B-1]`) in the data stream, receiver send the ACK for the last in-order byte of data (`A`):
 
@@ -1594,6 +1594,149 @@ When host receives segment with destination port 80, while host is not accepting
 
 ## 3.6 Principles of Congestion Control
 
+**Available Bit-Rate (ABR)** service in **Asynchronous Transfer Mode (ATM)** networks.
+
+### 3.6.1 The Causes and the Costs of Congestion
+
+```
+       R_in                            R_out
+Host A      Host B              Host C      Host D
+  |           |                   |           |
+  +-----+-----+                   +-----+-----+
+        |            Buffer             |
+        +----------> Router ----->------+
+                            Link Capacity (outgoing)
+```
+
+Things to consider:
+
+1.  Finite buffer in router
+2.  Finite link capacity
+3.  Multihop of routers
+
+Bad things:
+
+1.  Queuing delays is large when packet-arrival speed nears link capacity;
+2.  Buffer overflow will cause packet retransmission;
+3.  Router will use small bandwidth to forward unneeded copies due to unneeded retransmission (case 2);
+4.  When a packet is dropped along a path, the transmission capacity that was used at each of the upstream links to forward that packet to the point at which it is dropped ends up having been wasted.
+
+### 3.6.2 Approaches to Congestion Control
+
+2 approaches to congestion control at boardcast level:
+
+1.  End-to-end congestion control. Network does not provide support for transport layer. (TCP's way)
+2.  Network-assisted congestion control. E.g., router provides feedback to sender. 
+
+## 3.7 TCP Congestion Control
+
+Each sender limits the sending traffic when congestion is detected. When finds congestion (sender to receiver path) is small, increases the sending rate; else, reduces it. 
+
+3 questions: (1) how to limit; (2) how to detect; (3) how to adujust.
+
+**Q1: how to limit**
+
+Keep a **congestion window** (`cwnd`): limit the sender's traffic into network:
+
+```
+LastByteSent - LasytByteAcked <= min{cwnd, rwnd}
+```
+
+The sent but not ACKed bytes is no greater than `min{cwnd, rwnd}`. So the sending speed is aroud `min{cwnd, rwnd}/RTT`. Thus by adjusting `cwnd`, we can control the sending rate.
+
+**Q2: how to detect**
+
+Loss event: when (1) timeout; (2) 3-duplicated-ACKs, so a packet is lost. In congestion, router drops the packet from buffer, making this loss event.
+
+Self-Clocking: sender uses ACK rate to increase window size.
+
+**Q3: how to adjust**
+
+Trade-off: network congestion vs bandwidth usage
+
+1.  A lost segment implies congestion, so the sending rate should decrease when a segment is lost;
+2.  An ACK means the network is capable to carry more segments, so increase
+3.  Bandwidth probing: keep retrying to reach the bandwidth limit.
+
+ACKs and loss segments are all implicit signals.
+
+**TCP Congestion-Control Algorithm**: (1) slow start; (2) congestion avoidance; (3) fast recovery
+
+#### Slow Start
+
+`cwnd` is small at beginning of connection, 1 MSS [RFC 3390]. So the initial sending rate is around `MSS/RTT = 500Bytes/200ms = 20KBPS`. 
+
+For each first ACK, when in _slow start_ state, `cwnd` increases 1 MSS. 
+
+```
+Sender:
+
+1.  seq = 0, data size = 1 MSS
+        cwnd = 1 MSS
+
+2.  seq = 0 ACK
+        cwnd = 1 + 1 MSS
+        send 1 + 1 MSS data (2 segments):
+            seq = 1 MSS, data size = 1 MSS
+            seq = 2 MSS, data size = 1 MSS
+
+3.  seq = MSS ACK
+        cwnd = 2 + 1 = 3 MSS
+        send 3 MSS data (3 segments):
+            seq = 3 MSS, data size = 1 MSS
+            seq = 4 MSS, data size = 1 MSS
+            seq = 5 MSS, data size = 1 MSS
+
+4.  seq = MSS ACK
+        cwnd = 3 + 1 = 4 MSS
+        send 4 MSS data (4 segments):
+            seq = 1 MSS, data size = 1 MSS
+            seq = 2 MSS, data size = 1 MSS
+            seq = 3 MSS, data size = 1 MSS
+            seq = 4 MSS, data size = 1 MSS
+```
+
+Ordered by ACKed segment index, num of childs increases in BFS order:
+
+```
+[0]=1 MSS When seq=0 is ACKed, it's having 1 MSS cwnd
+ |
+[1]=2 MSS
+ |
+ +---------------------------+
+ |                           |
+[2]=3 childs                [3]=4 childs
+ |                           |
+ +-------+-------+           +-------+-------+-------+
+ |       |       |           |       |       |       |
+[4]=5   [5]=6   [6]=7       [7]=8   [8]=9   [9]=10  [10]=11
+```
+
+So `cwnd` grows slow first but fast with time (exponentional). 3 cases to stop fast start:
+
+1.  Packet timeout, so a loss. Cut `cwnd` to half: `cwnd/2`. 
+2.  `cwnd` reaches a threshold `ssthresh`. `ssthresh` is the half of last congestion `cwnd` value. Switches to **congestion avoidance** state.
+3.  Three-duplicated-ACKs, packet loss. TCP performs fast retransmit and switches to **fast recovery** state. 
+
+#### Congestion Avoidance
+
+TCP increase `cwnd` one MSS each RTT. Linar to time. To implement this, for each ACK, `cwnd += MSS * MSS / cwnd`. 
+
+When three-duplicated-ACKs, packet loss. So threshold to half, linearly increase `cwnd`, to **Fast recovery**.
+
+#### Fast Recovery
+
+Linear increase, 1 MSS for each duplicate ACK. When ACK for the missing segment arrives, switch to congestion-avoidance.
+
+#### TCP Congestion Control: Retrospective
+
+Additive-Increase, Multiplicative-Decrease (AIMD)
+
+Three-duplicated-ACKs are often the packet loss, fast recovery. 
+
+So the `cwnd-time` curve will fluctuate around bandwidth. 
+
+FSM
 
 # Chapter 4 The Network Layer
 
