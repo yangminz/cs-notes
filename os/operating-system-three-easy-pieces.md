@@ -249,3 +249,174 @@ another way: locking
 # Chapter 32. Concurrency Bugs
 
 # Chapter 33. Event-Based Concurrency
+
+# Chapter 36. I/O Devices
+
+## 36.1 System Architecture
+
+CPU & DRAM: memory bus
+
+CPU & GPU, display: general I/O bus, PCIe
+
+CPU & disk, mice, keyboards: peripheral bus, e.g. USB
+
+speed vs cost ==> hierarchy
+
+```
+            PCIe Graphics           Memory Interconnect
+Graphics <-----------------> CPU <-----------------------> Memory
+                              ^
+                              |
+                              | DMI
+                              |
+            PCIe              v         eSATA
+Network <----------------> I/O Chip <--------------------> Disk
+                              ^
+                              |
+                              | USB
+                              |
+                              v
+                       Keyboard, Mouse
+```
+
+## 36.2 A Canonical Device
+
+2 components of a device:
+
+1.  Hardware interface: exposed to OS
+2.  Internal structure: implementation
+
+E.g.
+
+```
++---------------------------------------+
+|   Registers: Status, Command, Data    |   interface
++---------------------------------------+
+|   CPU, DRAM, other chips              |   implementation
++---------------------------------------+
+```
+
+## 36.3 A Canonical Protocol
+
+A typical interaction:
+
+```
+While (Status == Busy)              // polling
+    ;                               // polling
+
+Write data to Register.Data;        // data movement:
+Write command to Register.Command;  // programmed I/O, PIO
+
+While (Status == Busy)              // polling
+    ;                               // polling
+```
+
+**Polling** the device: OS waits until device is ready to receive a command by repeatedly reading the status.
+
+Polling is wasting CPU time. 
+
+## 36.4 Lowering CPU Overhead With Interrupts
+
+OS issue a request, put the calling process to sleep, then context switch to another process. When device is finished, raise a hardware interrupt, causing CPU to jump into the OS at predetermined **interrupt service routine (ISR)**, or **interrupt handler**. 
+
+Interrupt allows overlapping of CPU and I/O, improving CPU utilization time:
+
+```
+process 1                       polling         process 1
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+| 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | p | p | p | p | 1 | 1 | 1 | 1 |   CPU
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+                                | 1 | 1 | 1 | 1 |                   Device
+                                +---+---+---+---+
+                                process 1
+```
+
+With interrupt:
+
+```
+process 1                       process 2       process 1
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+| 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 2 | 2 | 1 | 1 | 1 | 1 |   CPU (context switch)
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+                                | 1 | 1 | 1 | 1 |                   Device
+                                +---+---+---+---+
+                                process 1
+```
+
+Spin lock is good only when the device task is quick, in this case, interrupt is not good.
+
+Or use hybrid: two-phased approach, poll a little while, then interrupt.
+
+**Network: not use interrupt.** A huge stream, each packet an interrupt, **live lock**: OS is only processing interrupts and never allowing user process to run and serve the request!!! It's better to ocasionally use polling to allow web server to serve some requests before going back to the device to check for more packet arrivals.
+
+> Eliminating Receive Livelock in an Interrupt-driven Kernel
+> not flow-controlled application protocol: multi-media app. Constant-rate, low-latency service; UDP instead of TCP. 
+> **Receive Livelock**
+> Solution: improve the purely interrupt-driven model and guarantee throughput and latency under overload
+
+Coalescing the interrupts: device waits for next interrupt before sending signal to CPU. Merge the data from 2 interrupts, and send one interrupt only. 
+
+## 36.5 More Efficient Data Movement With DMA
+
+When PIO is transfering many data to device, CPU overburdened with trivial task, and wasting time.
+
+```
+process 1           p1 copying  process 2       process 1
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+| 1 | 1 | 1 | 1 | 1 | c | c | c | 2 | 2 | 2 | 2 | 1 | 1 | 1 | 1 |   CPU (copying)
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+                                | 1 | 1 | 1 | 1 |                   Device
+                                +---+---+---+---+
+                                process 1
+```
+
+How to lower PIO overheads? CPU is spending too much time moving data to and from device.
+
+**Direct Memory Access (DMA)**. DMA engine is a special device can orchestrate transfers between device & main memory _without much CPU help_.
+
+```
+process 1           process 2                   process 1
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+| 1 | 1 | 1 | 1 | 1 | 2 | 2 | 2 | 2 | 2 | 2 | 2 | 1 | 1 | 1 | 1 |   CPU
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+                    | c | c | c |                                   DMA copying
+                    +---+---+---+---+---+---+---+
+                                | 1 | 1 | 1 | 1 |                   device
+                                +---+---+---+---+
+                                process 1
+```
+
+## 36.6 Methods of Device Interaction
+
+2 primary methods of device communication:
+
+1.  Explicit I/O instructions in ISA (old method)
+2.  Memory mapped I/O: take device registers as memory locations.
+
+Both in use today.
+
+## 36.7 Fitting Into The OS: The Device Driver
+
+Build a file system working on top of SCSI disks, IDE disks, USB keychian drivers, etc. Use the FS to issue read or write requests to different types of devices. -- Device driver to do the abstraction.
+
+```
+Application
+------------------------- POSIX API [open, read, write, close, etc]
+File System | Raw
+------------------------- Generic Block Interface [block read/write]
+Generic Block Layer
+------------------------- Specific Block Interface [protocol-specified read/write]
+Device Driver [SCSI, ATA, etc]
+```
+
+# Chapter 39. Interlude: Files and Directories
+
+
+
+
+
+
+
+
+
+
