@@ -116,6 +116,88 @@ shared lib: a special case of memory-mapped files. **syscall to map a file onto 
 
 provide an alternative model for I/O: **files can be accessed as a big byte array in memory**.
 
+# Chapter 5. Input/Output
+
+OS controls all I/O devices: issue commands to the devices, catch interrupts, handle errors. So OS must provide an interface between the device & rest of OS. 
+
+## 5.1 Principles of I/O Hardware
+
+### 5.1.1 I/O Devices
+
+3 categories of devices:
+
+1.  Block device: Transfer data in blocks structure (512 Bytes to 65536 Bytes). The structure is addressable. Hard disks, USB sticks, etc. File system deals with abstract block devices.
+2.  Character device: Transfer character stream without any structure. Not addressable. Pritners, network interfaces, mice, and other not disk-like devices.
+3.  Timer/Clock.
+
+### 5.1.2 Device Controllers
+
+I/O units: mechanical component (the device itself) & electronic component (device controller or adapter). Controller can handle 2, 4, 8, etc identical devices.
+
+### 5.1.3 Memory-Mapped I/O
+
+Each controller has control registers to communicate with CPU. And data buffer to transfer data. Problem: How CPU do the communication?
+
+1.  Each control register assigned an **I/O port number**. CPU uses special I/O instructions to r/w the port. Early computers work in this way. This makes the address spaces different for VM & I/O.
+2.  Map all control registers into (kernel) memory space, each control register assigned a unique memory address. I.e. **Memory-Mapped I/O**. 
+
+In hardware implementation, when CPU wants to read from device, (from memory or I/O port), CPU write address to bus's _address line_ and signal READ to bus' _control line_. Then DRAM or I/O device gives response.
+
+Memory-Mapped I/O:
+
+Pros:
+
+1.  No special I/O instructions for r/w device control registers, so C/C++ code is still good.
+2.  No special protection mechanism is needed for user process.
+3.  Old instructions can reference control registers. 
+
+Cons:
+
+1.  Caching a device control register is very bad. May not sync with physical device. Page table should disable caching for this part.
+2.  Multiple data bus: CPU - DRAM, CPU - Devices, making the memory address complex in the only one address space. Put a snooping device on memory bus to redirect the I/O related reference.
+
+### 5.1.4 Direct Memory Access
+
+? For block device ?
+
+CPU must address the device controllers to transfer data with them (may not implement memory-mapped I/O). Use **DMA, Directed Memory Access** to effectively use CPU time (time multiplexing between CPU & device) by reducing CPU copying time.
+
+Hardware should have a DMA controller. E.g. integrated into disk controllers, etc. A separate DMA controller is needed for each device. The physical location is not important, DMA controller must have access to the _system bus_ indepedent of CPU.
+
+CPU programs the DMA controller by setting its registers so it knows which disk area to transfer from disk into DMA controller buffer. ...
+
+Bus can run in 2 modes: (1) word-at-a-time mode, (2) block mode. DMA controllers can also run in 2 modes. (1) **Cycle Stealing**: DMA may steal cycle of bus from CPU, CPU needs to wait for DMA controller. (2) **Burst Mode**: DMA tells the device to acqurie the bus and issue multiple transfers, then release the bus. 
+
+Why disk first reads data into disk controller buffer before DMA starts?
+
+1.  Verify the checksum before transfer
+2.  Disk data to disk controller buffer speed is constant, but bus transfer speed is unstable.
+
+But if DMA is slower than CPU, it's no good to use DMA.
+
+### 5.1.5 Interrupts Revisited
+
+1.  Device finished the work, asserts a sginal on bus line
+2.  Interrupt controller chip detects this signal. If no other pending interrupt, then handle this interrupt immediately. Else, this signal is ignored. The device continues signals to CPU until it's ACKed.
+3.  Interrupt controller puts a number on address line to specify the device, and signals interrupt to CPU.
+
+The above is hardware's work. Now OS's work:
+
+When CPU is interrupted (check before/after each instruction execution), CPU use the number on address link as index into **interrupt vector table** to go into the handler routine. 
+
+CPU use one control register to point to interrupt vector table. The interrupt service ACKs the interrupt by writing to one of the interrupt controller's I/O ports. Consider avoiding **race condition** here.
+
+Before start interrupt handling, hardware should save the hardware context (trap). At extreme, all visible registers may be saved.
+
+To where save this hardware context? One option, save them to CPU's internal registers (TSS?). But the registers can be overwritten by another interrupt. May lost interrupts & data.
+
+So most CPU save the information on stack. Not user stack, but kernel stack. But switch into kernel mode **may** need to change MMU contexts, and invalidates the cache & TLB. 
+
+#### Precise and Imprecise Interrupts
+
+Old architecture, CPU checks pending interrupts after each instruction execution. But how about pipelined & superscalar parallel CPUs? 
+
+
 
 
 

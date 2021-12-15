@@ -1,5 +1,47 @@
 3rd Edition By Randal E. Bryant and David R. O'Hallaron
 
+# Chapter 8. Exception Control Flow
+
+## 8.1 Exceptions
+
+### 8.1.2 Classes of Exceptions
+
+```
++---------------+-------------------------------+-----------+-------------------------------+
+| Class         | Cause                         | (A)Sync   | Return behavior               |
++---------------+-------------------------------+-----------+-------------------------------+
+| Interrupt     | Signal from I/O device        | Async     | Always return to next inst    |
+| Trap/Syscall  | Intentional exception         | Sync      | Always return to next inst    |
+| Fault         | Potentially recoverable error | Sync      | Might return to current inst  |
+| Abort         | Nonrecoverable error          | Sync      | Never returns                 |
++---------------+-------------------------------+-----------+-------------------------------+
+```
+
+#### Interrupts
+
+Async as a result of signals from I/O devices external to CPU: Network adapters, disk controllers, timer chips. Especially timer interrupt to force context switch.
+
+After/Before the current instruction execution, CPU check _interrupt pin_ and see if it's high (means there is a interrupt signal). If high, CPU reads interrupt number from system bus and call the handler. When returns, resume the execution of next instruction. But CPU's control may give to other processes due to context switch.
+
+#### Traps and System Calls
+
+As the result of executing system call instructions, `int` for interrupt or `syscall` for system call. These are _intentional exceptions_. Identical to a regular function call, but in kernel mode.
+
+#### Faults
+
+As a result of unexpected error when executing instructions. E.g. Access Violation, Page Fault, Divide by Zero, etc. Process may register handlers to catch these faults. If such error can be handled, then re-execute the instruction. Else, OS goes to abort routine to terminate the process.
+
+-   Divide error: /0. Linux can report the error
+-   General protection fault: E.g. reference an undfined address or write to an RO memory. _Segmentation Faults_. Use this with Page Fault to implement `fork`.
+-   Page fault: Page table entry indicates that the virtual address is not in DRAM.
+
+#### Abort
+
+Uncatched or unhandled or unrecoverable fatal errors. Process would crash, but OS is still safe. 
+
+E.g. Machine check: fatal hardware error detected when executing a instruction. Process is terminated immediately.
+
+
 # Chapter 9. Virtual Memory
 
 ## 9.7 Case Study: The Intel Core i7/Linux Memory System
