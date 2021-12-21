@@ -363,6 +363,112 @@ Hardware uses the stack specified in TSS, set by kernel. Kernel stack after `int
 
 `iret` return from `int` instruction: pops the saved values from kernel stack, resumes execution at saved `%eip`.
 
+## Code: Assembly trap handlers
+
+X86 allows for 256 different interrupts. 0-31 defined for software exceptions/faults. 64 is for system call interrupt.
+
+When system call, the gate is _trap_. Do not clear `IF` flag, allowing other interrupts during syscall handling. Set privilege: user program to trap into kernel. Kernel should not use user stack because it may be invalid. 
+
+X86 hardware is programed to perform stack switch on trap by setting up task segment descriptor through which the hardware loads a stack segment selector and a new value for `%esp`. 
+
+When traps (`int 64`), save stack and PC, error no, flags. Each entry pushes an error code if CPU didn't, then push interrupt number, then jumps to `alltraps`.
+
+**This `alltraps` is part of OS's interrupt handler now. It's not provided by hardware.**
+
+`alltraps` continues to save processor registers: from `%ds` to `%rax`, this is the trap frame. **CPU pushes `SS, ESP, EFLAGS, CS, EIP`, CPU or trap vector pushes error number, `alltraps` pushes the rest.** These are the necessary info to resume the user process execution. Including `%rax`, the system call number.
+
+After `alltraps`, user mode status are all saved. Now prepare to run kernel C code. CPU sets `CS, SS`, `alltraps` sets `DS, ES`. `alltraps` call C trap handler `trap`, push `%esp` (the trap frame just created) to stack as **argument to `trap`**. 
+
+Then call `trap` with argument, the old kernel stack's top, trap frame.
+
+When `trap` returns from kernel to user, pop arguments off the stack, then execute code at label `trapret`. Finally `iret` to jump to user space.
+
+Trap in kernel: no stack switch.
+
+```
+ cpu->ts.esp0
+ ------------->  +------------+ --+
+             /   | ss         |   | Only present on
+            /    +------------+   | privilege change
+            |    | esp        |   |
+            |    +------------+ --+
+Processor   |    | eflags     |
+pushed      |    +------------+
+int n inst  |    | cs         |
+            |    +------------+
+            |    | eip        |
+            |    +------------+
+            +--  | error no   | --+
+                 +------------+   |
+                 | General    |   | alltrap pushed
+                 | purpose    |   | trapframe
+  esp            | registers  | --+
+  ------------>  +------------+
+                 |            |
+                 | Empty      | used by kernel functions, e.g. kmalloc
+  pcb->kstack    |            |
+  ------------>  +------------+
+```
+
+Linux:
+
+Register IDT:
+
+```c
+arch/x86/include/asm/irq_vectors.h
+#define IA32_SYSCALL_VECTOR		0x80
+
+arch/x86/kernel/idt.c
+#if defined(CONFIG_IA32_EMULATION)
+	SYSG(IA32_SYSCALL_VECTOR,	entry_INT80_compat),
+#elif defined(CONFIG_X86_32)
+	SYSG(IA32_SYSCALL_VECTOR,	entry_INT80_32),
+```
+
+Entering system call
+
+```c
+arch/x86/entry/entry_32.S
+
+/*
+ * 32-bit legacy system call entry.
+ *
+ * 32-bit x86 Linux system calls traditionally used the INT $0x80
+ * instruction.  INT $0x80 lands here.
+ *
+ * This entry point can be used by any 32-bit perform system calls.
+ * Instances of INT $0x80 can be found inline in various programs and
+ * libraries.  It is also used by the vDSO's __kernel_vsyscall
+ * fallback for hardware that doesn't support a faster entry method.
+ * Restarted 32-bit system calls also fall back to INT $0x80
+ * regardless of what instruction was originally used to do the system
+ * call.  (64-bit programs can use INT $0x80 as well, but they can
+ * only run on 64-bit kernels and therefore land in
+ * entry_INT80_compat.)
+ *
+ * This is considered a slow path.  It is not used by most libc
+ * implementations on modern hardware except during process startup.
+ *
+ * Arguments:
+ * eax  system call number
+ * ebx  arg1
+ * ecx  arg2
+ * edx  arg3
+ * esi  arg4
+ * edi  arg5
+ * ebp  arg6
+ */
+SYM_FUNC_START(entry_INT80_32)
+	ASM_CLAC
+	pushl	%eax			/* pt_regs->orig_ax */
+
+	SAVE_ALL pt_regs_ax=$-ENOSYS switch_stacks=1	/* save rest */
+
+	movl	%esp, %eax
+	call	do_int80_syscall_32
+```
+
+**Note that: when trapped into kernel, all registers are user process register values, only rip & rsp are kernel values, saved in TSS before. So how do we find the task PCB? Use `thread_info` to get the current process.**
 
 ## Code: Interrupts
 
