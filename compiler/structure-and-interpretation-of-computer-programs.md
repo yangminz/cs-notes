@@ -1,4 +1,310 @@
-2nd Edition By Hal Abelson, Jerry Sussman and Julie Sussman
+Original Edition By Hal Abelson, Jerry Sussman and Julie Sussman
+[JavaScript Edition](https://sourceacademy.org/sicpjs/) By Martin Henz and Tobias Wrigstad
+
+# Chapter 1. Building Abstractions with Functions
+
+## Programming in JavaScript
+
+Just-In-Time (JIT) compilation
+
+first-class functions: function as variable. Lambda expression, functional abstraction.
+
+## 1.1  The Elements of Programming
+
+-   **primitive expressions**, which represent the simplest entities the language is concerned with,
+-   **means of combination**, by which compound elements are built from simpler ones, and
+-   **means of abstraction**, by which compound elements can be named and manipulated as units.
+
+### 1.1.1  Expressions
+
+Combinations: `operand operator operand ...` *Infix Notation*: `(1 + 2) * 3`
+
+> JavaScript programmers know the value of everything but the cost of nothing.
+
+### 1.1.2  Naming and the Environment
+
+Constant declarations:
+
+```js
+const size = 2;
+size = 4;
+//  VM367:1 Uncaught TypeError: Assignment to constant variable.
+//      at <anonymous>:1:6
+```
+
+Program environment: the memory to keep track of name-object pairs.
+
+### 1.1.3   Evaluating Operator Combinations
+
+Evaluate one operator combination:
+
+1.  Evaluate the operand expressions of the combination. Evaluation rule is **Recursive**!! Finally to leaf nodes (primitive):
+        -   the values of numerals are the numbers that they name
+        -   the values of names are the objects associated with those names in the environment
+2.  Apply the function that is denoted by the operator to the arguments that are the values of the operands.
+
+`const x = 3;` is not a combination.
+
+### 1.1.4   Compound Functions
+
+Function declarations:
+
+```js
+function square(x) {
+    return x * x;
+}
+```
+
+Function application expression:
+
+```js
+square(14);
+```
+
+### 1.1.5   The Substitution Model for Function Application
+
+```
+f(5)
+sum_of_squares(a + 1, a * 2) (5)    // substitue `f`
+sum_of_squares(5 + 1, 5 * 2)        // substitue `a`
+sum_of_squares(6, 10)               // evaluate parameters
+square(6) + square(10)              // substitue `sum_of_squares`
+(6 * 6) + (10 * 10)                 // substitue `square`
+36 + 100                            // evaluate leaf nodes
+136
+```
+
+Substitution is not on text or string, but on **MEMORY**.
+
+#### Applicative order versus normal order
+
+-   Applicative-order evaluation model: evaluate the arguments and then apply (js)
+-   Normal-order evaluation model: fully expand and then reduce (memory costly)
+
+```
+f(5)
+sum_of_squares(5 + 1, 5 * 2)                // substitue `a`
+square(5 + 1) + square(5 * 2)               // substitue `sum_of_squares`
+((5 + 1) * (5 + 1)) + ((5 * 2) * (5 * 2))   // substitue `square`
+136
+```
+
+### 1.1.6   Conditional Expressions and Predicates
+
+Conditional expression:
+
+```js
+function abs(x) {
+    // predict ? expression-true : expression-false
+    return x >= 0 ? x : x === 0 ? 0 : - x;
+} 
+```
+
+Right-associative.
+
+`l && r` or `l || r`, `&&` and `||` are **syntactic forms**, not operators; their right-hand expression `r` is not always evaluated. *SHORT CUT.* `!a`, `!` is unary operator. `a` would be evaluated.
+
+#### Exercise
+
+Test applicative-order or normal-order evaluation with short cut:
+
+```js
+function p() { return p(); }
+
+function test(x, y) {
+    return x === 0 ? 0 : y;
+} 
+
+test(0, p());
+```
+
+`p()` is infinite recursive that never returns.
+
+-   Applicative Order: `test(x, y)`, `y = p()` would never be evaluated, never return.
+-   Normal Order: `test(0, p()) ==> 0 === 0 ? 0 : p()`, short cut to `0`, return `0`.
+
+### 1.1.7  Example: Square Roots by Newton's Method
+
+In mathematics we are usually concerned with declarative (what is) descriptions, whereas in computer science we are usually concerned with imperative (how to) descriptions.
+
+```js
+function sqrt(x) {
+    return sqrt_iter(1, x);
+} 
+
+function sqrt_iter(guess, x) {
+    return is_good_enough(guess, x)
+           ? guess
+           : sqrt_iter(improve(guess, x), x);
+}
+
+function improve(guess, x) {
+    return average(guess, x / guess);
+} 
+
+function average(x, y) {
+    return (x + y) / 2;
+} 
+
+function is_good_enough(guess, x) {
+    return abs(square(guess) - x) < 0.001;
+} 
+```
+
+The function `sqrt_iter`, on the other hand, demonstrates how iteration can be accomplished using no special construct other than the ordinary ability to call a function. **Tail Recursion** ensures efficiency.
+
+#### Exercise
+
+```js
+function conditional(predicate, then_clause, else_clause) {		    
+    return predicate ? then_clause : else_clause;
+} 
+```
+
+In this case, short cut will not work (for applicative-order). Must evaluate all parameters:
+
+```js
+conditional(true, good(), dead_loop());
+```
+
+### 1.1.8   Functions as Black-Box Abstractions
+
+Recursive: function is defined in terms of itself. 
+
+The decomposition of the problem into subproblems. Take sub-solutions as black box. 
+
+> So a function should be able to suppress detail. The users of the function may not have written the function themselves, but may have obtained it from another programmer as a black box. A user should not need to know how the function is implemented in order to use it.
+
+#### Local names
+
+The meaning of a function should be independent of the parameter names:
+
+```js
+function square(x) {
+    return x * x;
+} 
+
+function square(y) {
+    return y * y;
+} 
+```
+
+*Thus the parameter names of a function must be local to the body of the function.* If not, then not black box. -- Name isolation: parameter names are local to function body.
+
+-   Bound
+-   Bind
+-   Free
+-   Scope
+
+#### Internal declarations and block structure
+
+Localize the subfunctions to not mix up with other functions:
+
+```js
+function sqrt(x) {
+    function is_good_enough(guess) {
+        return abs(square(guess) - x) < 0.001;
+    }
+    function improve(guess) {
+        return average(guess, x / guess);
+    }
+    function sqrt_iter(guess) {
+        return is_good_enough(guess)
+               ? guess
+               : sqrt_iter(improve(guess));
+    }
+    return sqrt_iter(1);
+} 
+```
+
+`x` **Lexical scoping**. 
+
+## 1.2   Functions and the Processes They Generate
+
+### 1.2.1  Linear Recursion and Iteration
+
+Factorial:
+
+```js
+function factorial(n) {
+    return n === 1 
+           ? 1
+           : n * factorial(n - 1);
+} 
+```
+
+Substitution model, recursive. Deferred operations: a chain of multiplications. Need to keep track of operations to be performed later on. **Linear recursive process**.
+
+```
+factorial(4)
+4 * factorial(3)
+4 * (3 * factorial(2))
+4 * (3 * (2 * factorial(1)))
+4 * (3 * (2 * 1))
+4 * (3 * 2)
+4 * 6
+24
+```
+
+Iteration does not grow and shrink. **Iterative process**: maintain *state variables*, e.g. loop counter. **Linkear iterative process**. 
+
+```js
+function factorial(n) {
+    return fact_iter(1, 1, n);
+}
+function fact_iter(product, counter, max_count) {
+    return counter > max_count
+           ? product
+           : fact_iter(counter * product,
+                       counter + 1,
+                       max_count);
+}
+```
+
+C, Java, Python, etc. stack memory usage grows with number of calls (call stack), even when the process is iterative. **Tail recursive** implementation: no difference. Iteration is syntatic sugar for recursion.
+
+#### Exercise
+
+Ackermann's function:
+
+```js
+function A(x, y) {
+    return y === 0
+           ? 0
+           : x === 0
+           ? 2 * y
+           : y === 1
+           ? 2
+           : A(x - 1, A(x, y - 1));
+} 
+```
+
+### 1.2.2  Tree Recursion
+
+Fibonacci:
+
+```js
+function fib(n) {
+    return n === 0
+           ? 0
+           : n === 1
+           ? 1
+           : fib(n - 1) + fib(n - 2);
+} 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Chapter 5. Computing with Register Machines
 
