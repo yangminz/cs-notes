@@ -1,4 +1,5 @@
 Original Edition By Hal Abelson, Jerry Sussman and Julie Sussman
+
 [JavaScript Edition](https://sourceacademy.org/sicpjs/) By Martin Henz and Tobias Wrigstad
 
 # Chapter 1. Building Abstractions with Functions
@@ -293,16 +294,359 @@ function fib(n) {
 } 
 ```
 
+Iterative, much more efficient:
 
+```js
+function fib(n) {
+    return fib_iter(1, 0, n);
+}
+function fib_iter(a, b, count) {
+    return count === 0
+           ? b
+           : fib_iter(a + b, a, count - 1);
+} 
+```
 
+#### Example: Counting change
 
+Recursive
 
+```js
+function count_change(amount) {
+    return cc(amount, 5);
+}
 
+function cc(amount, kinds_of_coins) {
+    return amount === 0
+           ? 1
+           : amount < 0 || kinds_of_coins === 0
+           ? 0
+           : cc(amount, kinds_of_coins - 1)
+             +
+             cc(amount - first_denomination(kinds_of_coins),
+                kinds_of_coins);
+}
 
+function first_denomination(kinds_of_coins) {
+    return kinds_of_coins === 1 ? 1
+         : kinds_of_coins === 2 ? 5
+         : kinds_of_coins === 3 ? 10
+         : kinds_of_coins === 4 ? 25
+         : kinds_of_coins === 5 ? 50
+         : 0;   
+}
 
+count_change(100);
+```
 
+Same problem: duplicate calculation. Iterative method:
 
+```
+f(n) =    f(n - 1) * 1  // +1
+        + f(n - 2) * 2  // +1, +1; +2
+        + f(n - 3) * 3  // +1, +1, +1; +1, +2; +3
+        + ...
+```
 
+### 1.2.3  Orders of Growth
+
+$$ k_1 \times f(n) \leq \Theta(f(n)) \leq k_2 \times f(n) $$
+
+### 1.2.4  Exponentiation
+
+$O(N)$ exp:
+
+```js
+function expt(b, n) {
+    return expt_iter(b, n, 1);
+}
+function expt_iter(b, counter, product) {
+    return counter === 0
+           ? product
+           : expt_iter(b, counter - 1, b * product);
+} 
+```
+
+Linear:
+
+```
+b^8 = b * b^7
+b^7 = b * b^6
+b^6 = b * b^5
+b^5 = b * b^4
+b^4 = b * b^3
+b^3 = b * b^2
+b^2 = b * b
+```
+
+$O(\log N)$ exp:
+
+```js
+function square(x) {
+    return x * x;
+}
+
+function is_even(n) {
+    return n % 2 === 0;
+}
+
+function fast_expt(b, n) {
+    return n === 0
+           ? 1
+           : is_even(n)
+           ? square(fast_expt(b, n / 2))
+           : b * fast_expt(b, n - 1);
+}
+```
+
+Binary:
+
+```
+b^8 = b^4 * b^4
+b^4 = b^2 * b^2
+b^2 = b * b
+```
+
+#### Exercise
+
+Binary Fibbonacci with power of matrix:
+
+$$ [F_n, F_{n-1}] \times [[1, 0], [1, 0]] = [F_{n+1}, F_{n}]$$
+
+```js
+function fib(n) {
+    return fib_iter(1, 0, 0, 1, n);
+}
+
+function fib_iter(a, b, p, q, count) {
+    return count === 0
+           ? b
+           : is_even(count)
+           ? fib_iter(a,
+                      b,
+                      p * p + q * q,
+                      2 * p * q + q * q,
+                      count / 2)
+           : fib_iter(b * q + a * q + a * p,
+                      b * p + a * q,
+                      p,
+                      q,
+                      count - 1);
+} 
+```
+
+### 1.2.5  Greatest Common Divisors
+
+`GCD(a, b)` is the largest integer that divides both `a` and `b` with no remainder. E.g. `GCD(16, 28)` is `4`.
+
+Euclid's algorithm:
+
+```js
+function gcd(a, b) {
+    return b === 0 ? a : gcd(b, a % b);
+} 
+```
+
+> Lamé's Theorem: If Euclid's Algorithm requires $k$ steps to compute the GCD of some pair, then the smaller number in the pair must be greater than or equal to the $k^{th}$ Fibonacci number.
+
+Thus the complexity is $\Theta(\log N)$.
+
+### 1.2.6  Example: Testing for Primality
+
+Linear search for prime testing:
+
+```js
+function is_prime(n) {
+    return n === smallest_divisor(n);
+} 
+function smallest_divisor(n) {
+    return find_divisor(n, 2);
+}
+function find_divisor(n, test_divisor) {
+    return square(test_divisor) > n
+           ? n
+           : divides(test_divisor, n)
+           ? test_divisor
+           : find_divisor(n, test_divisor + 1);
+}
+function divides(a, b) {
+    return b % a === 0;
+} 
+```
+
+$O(\sqrt{N})$ for `is_prime(n)`: $\sqrt{n} \times \sqrt{n} = n$.
+
+> Fermat's Little Theorem: If $n$ is a prime number and $a$ is any positive integer less than $n$, then $a$ raised to the $n^{th}$ power is congruent to $a$ modulo $n$.
+> Two numbers are said to be **congruent modulo** $n$ if they both have the same remainder when divided by $n$.
+
+Example. Prime number $n = 5$, positive integer $a = 4$, $a^n = 4^5 = 1024$. $a^n \mod n = 1024 \mod 5 = 4$, $a \mod n = 4 \mod 5 = 4$.
+
+Use Fermat's Little Theorem to test prime number: pick some $a < n$ and check $a^n \mod n$ with $a \mod n$:
+
+```js
+function square(x) {
+    return x * x;
+}
+
+function is_even(n) {
+    return n % 2 === 0;
+}
+
+function expmod(base, exp, m) {
+    return exp === 0
+           ? 1
+           : is_even(exp)
+           ? square(expmod(base, exp / 2, m)) % m
+           : (base * expmod(base, exp - 1, m)) % m;
+}
+
+function random(n) {
+    return math_floor(math_random() * n);
+}
+
+function fermat_test(n) {
+    function try_it(a) {
+        return expmod(a, n, n) === a;
+    }
+    return try_it(1 + math_floor(math_random() * (n - 1)));
+}
+
+function fast_is_prime(n, times) {
+    return times === 0
+           ? true
+           : fermat_test(n)
+           ? fast_is_prime(n, times - 1)
+           : false;
+}
+```
+
+The non-prime number meets the condition that $a^n \mod n = a \mod n$ is rare (*Carmichael numbers*, 561, 1105, 1729, 2465, 2821, 6601 ...). So Fermat test is reliable in practice. **Probabilistic algorithms**.
+
+#### Exercise
+
+Miller-Rabin test (variant of Fermat test): For $a < n$ and $n$ prime: 
+
+$$a^{n-1} \mod n = 1$$
+
+code:
+
+```js
+function random(n) {
+    return math_floor(math_random() * n);
+}
+function miller_rabin_test(n) {
+    function expmod(base, exp, m) {
+        return exp === 0
+               ? 1
+               : is_even(exp)
+               ? square(trivial_test(expmod(base,
+                                            exp / 2,
+                                            m), 
+                                     m))
+                 % m
+               : (base * expmod(base, exp - 1, m)) 
+                 % m;
+    }
+    function trivial_test(r, m) {
+        return r === 1 || r === m - 1
+               ? r
+               : square(r) % m === 1
+               ? 0  // Nontrivial square root of 1 mod n
+               : r;
+    }
+    function try_it(a) {
+        return expmod(a, n - 1, n) === 1;
+    }
+    return try_it(1 + random(n - 1));
+}
+function do_miller_rabin_test(n, times) {
+    return times === 0
+           ? true   // pass all n tests
+           : miller_rabin_test(n)   // pass previous tests, test this time
+           ? do_miller_rabin_test(n, times - 1) // pass this test, goto next
+           : false; // fail this time
+} 
+```
+
+## 1.3   Formulating Abstractions with Higher-Order Functions
+
+Build abstractions by assigning names to common patterns and then to work in terms of the abstractions directly.
+
+Construct functions that can accept functions as arguments or return functions as values. Functions that manipulate functions are called **higher-order functions**.
+
+### 1.3.1   Functions as Arguments
+
+$\sum_i f(i)$ is a high order function takes $f$ as parameters:
+
+```js
+function sum(f, index, next, end) {
+    return index > end
+           ? 0
+           : f(a) + sum(f, next(a), next, b);
+}
+```
+
+Numerical integral:
+
+$$\int_a^b f = dx \cdot \left[ f\left(a + \frac{dx}{2}\right) + f\left(a + dx + \frac{dx}{2}\right) + f\left(a + 2dx + \frac{dx}{2}\right) + \cdots \right] $$
+
+Then
+
+```js
+function sum(f, a, next, b) {
+    return a > b
+           ? 0
+           : f(a) + sum(f, next(a), next, b);
+}
+
+function cube(x) {
+    return x * x * x;
+}
+
+function integral(f, a, b, dx) {
+    function add_dx(x) {
+        return x + dx;
+    }
+    return sum(f, a + dx / 2, add_dx, b) * dx;
+}
+
+integral(cube, 0, 1, 0.01);
+```
+
+#### Exercise
+
+Even more abstract than $\sum_i f(i)$:
+
+```js
+function accumulate(combiner, null_value, f, a, next, b) {
+    function iter(a, result) {
+        return a > b
+               ? result
+               : iter(next(a), combiner(f(a), result));
+    }
+    return iter(a, null_value);
+}
+```
+
+Even more abstract:
+
+```js
+function filtered_accumulate(combiner, null_value,
+                             f, a, next, b, filter) {
+    return a > b
+           ? null_value
+           : filter(a)
+             ? combiner(f(a), 
+                   filtered_accumulate(combiner, null_value, 
+                                       f, next(a), next, 
+                                       b, filter))
+             : filtered_accumulate(combiner, null_value, 
+                                   f, next(a), next, 
+                                   b, filter);
+} 
+```
+
+### 1.3.2   Constructing Functions using Lambda Expressions
 
 
 
