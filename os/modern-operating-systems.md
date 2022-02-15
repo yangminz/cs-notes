@@ -116,6 +116,21 @@ shared lib: a special case of memory-mapped files. **syscall to map a file onto 
 
 provide an alternative model for I/O: **files can be accessed as a big byte array in memory**.
 
+## 3.6 Implementation Issues
+
+### 3.6.2 Page Fault Handling
+
+1.  MMU traps to kernel. Push PC to kstack, save other info to special registers.
+2.  Save general registers & volatile info for later resume. Go into OS.
+3.  OS get page fault info (e.g. vaddr) from: (1) Hardware register; Or (2) parse current instruction.
+4.  Check page table: if vaddr is valid: page fault & protection fault. If not valid or bad protection, kill process. Else, run page replacement.
+5.  No free physical frame, select victim, swap to disk. When doing disk transaction, context switch to other processes.
+6.  On free frame available, swap in file-backed or create annoymous page, switch to other processes
+7.  I/O interrupt, switch back. Mark the frame in page table as normal.
+8.  Restore to the state before page fault instruction.
+9.  OS scheduled the fault process.
+10. Restore user space & re-execute the instruction.
+
 # Chapter 5. Input/Output
 
 OS controls all I/O devices: issue commands to the devices, catch interrupts, handle errors. So OS must provide an interface between the device & rest of OS. 
