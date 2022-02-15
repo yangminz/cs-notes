@@ -648,6 +648,110 @@ function filtered_accumulate(combiner, null_value,
 
 ### 1.3.2   Constructing Functions using Lambda Expressions
 
+Lambda expression: syntactic form for creating functions.
+
+```
+(parameters) => expression
+```
+
+With name or without name:
+
+```js
+const sqrt_sum = ((x, y) => x * x + y * y);
+sqrt_sum(3, 4); // with name
+((x, y) => x * x + y * y)(3, 4); // without name
+```
+
+### 1.3.3   Functions as General Methods
+
+Functions used to express general methods of computation, independent of the particular functions involved.
+
+#### Finding roots of equations by the half-interval method
+
+$$f(x) = 0$$
+
+```js
+function average(x, y) {
+    return (x + y) / 2;
+}
+
+function positive(x) { return x > 0; }
+function negative(x) { return x < 0; }
+
+function abs(x) {
+    return x >= 0 ? x : - x;
+}
+
+function close_enough(x, y) {
+    return abs(x - y) < 0.001;
+}
+
+function search(f, neg_point, pos_point) {
+    const midpoint = average(neg_point, pos_point);
+    if (close_enough(neg_point, pos_point)) {
+        return midpoint;
+    } else {
+        const test_value = f(midpoint);
+        return positive(test_value)
+               ? search(f, neg_point, midpoint)
+               : negative(test_value)
+               ? search(f, midpoint, pos_point)
+               : midpoint;
+    }
+}
+
+search(x => x * x - 1, 0, 2);
+```
+
+#### Finding fixed points of functions
+
+$$f(x) = x$$
+
+```js
+function abs(x) {
+    return x >= 0 ? x : - x;
+}
+
+const tolerance = 0.00001;
+function fixed_point(f, first_guess) {
+    function close_enough(x, y) {
+        return abs(x - y) < tolerance;
+    }
+    function try_with(guess) {
+        const next = f(guess);
+        return close_enough(guess, next)
+               ? next
+               : try_with(next);
+    }
+    return try_with(first_guess);
+}
+
+fixed_point(math_cos, 1);
+```
+
+### 1.3.4   Functions as Returned Values
+
+Return lambda:
+
+```js
+function average_damp(f) {
+    return x => average(x, f(x));
+} 
+```
+
+> Expert programmers know how to choose the level of abstraction appropriate to their task.
+
+Elements with the fewest restrictions are said to have **first-class status**. Some of the "rights and privileges" of first-class elements are:
+
+-   They may be referred to using names.
+-   They may be passed as arguments to functions.
+-   They may be returned as the results of functions.
+-   They may be included in data structures.
+
+Functions are first-class in JS.
+
+# Chapter 2.  Building Abstractions with Data
+
 
 
 # Chapter 5. Computing with Register Machines
