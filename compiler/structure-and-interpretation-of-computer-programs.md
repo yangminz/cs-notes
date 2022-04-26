@@ -832,80 +832,75 @@ tail(x); // 2
 
 This is the pair implementation of lambda calculus. Lambda expression has 3 forms:
 
-1. $x$: Variable. Representing the value.
-2. $(\lambda x. E)$: Abstraction. Definition of function. Variable $x$ is the bound in expression.
-3. $(E F)$: Application. Apply lambda term $F$ to expression $E$.
+1. `x`: Variable. Representing the value.
+2. `(x => E)`: Abstraction. Definition of function. Variable `x` is the bound in expression.
+3. `E(F)`: Application. Apply lambda term `F` to expression `E`.
 
 The reduction operations:
 
-1. $(\lambda x. E[x]) \rightarrow (\lambda y. E[y])$: $\alpha$-conversion, rename the bound variables $x$ to $y$ to avoid name confliction.
-2. $((\lambda x.E)F) \rightarrow (E[x\coloneqq F])$: $\beta$-reduction, replace the bound variables $x$ with expression $F$.
+1. `(x => E[x])`$\rightarrow$`(y => E[y])`: $\alpha$-conversion, rename the bound variables `x` to `y` to avoid name confliction.
+2. `(x => E)(F)` $\rightarrow$ `(E[x := F])`: $\beta$-reduction, replace the bound variables `x` with expression `F`.
 
 Then a pair
 
-$$
-Pair \coloneqq (\lambda a. (\lambda b. (\lambda f. ((f a)b))))
-$$
+```js
+pair = a => (b => (f => (f(a))(b)));
+```
 
-$f$ is the operator for the pair. Then select:
+`f` is the operator for the pair. Then select:
 
-$$
-Head \coloneqq \lambda p. p (\lambda x.\lambda y. x)
-$$
-
-$$
-Tail \coloneqq \lambda p. p (\lambda x.\lambda y. y)
-$$
+```js
+head = p => p(x => (y => x));
+tail = p => p(x => (y => y));
+```
 
 While we can take these 2 higher-order function as bool:
 
-$$
-True \coloneqq \lambda x.\lambda y. x
-$$
-
-$$
-False \coloneqq \lambda x.\lambda y. y
-$$
+```js
+true  = x => (y => x);
+false = x => (y => y);
+```
 
 Then get head operation:
 
-$$
-P_{1,2} = (P(1))(2) = ((\lambda a. (\lambda b. (\lambda f. ((f a)b))))(1))(2)
-$$
+```js
+p12 = (pair(1))(2)
+= ((a => (b => (f => (f(a))(b))))(1))(2)
+```
 
-$\beta$-reduction $a \coloneqq 1$:
+$\beta$-reduction `a := 1`:
 
-$$
-P_{1,2} = ((\lambda 1. (\lambda b. (\lambda f. ((f 1)b)))))(2)
-$$
+```js
+((a => (b => (f => (f(a))(b))))(1))(2)
+= (a => (b => (f => (f(1))(b))))(2)
+```
 
-Then the sub-expression $(\lambda b. (\lambda f. ((f 1)b)))$ is no longer bounded by variable $a$, so the parameter can be removed:
+Then the sub-expression `(a => (b => (f => (f(1))(b))))` is no longer bounded by variable `a`, so the parameter can be removed:
 
-$$
-P_{1,2} = (\lambda b. (\lambda f. ((f 1)b)))(2)
-$$
+```js
+(a => (b => (f => (f(1))(b))))(2)
+= (b => (f => (f(1))(b)))(2)
+```
 
-$\beta$-reduction $b \coloneqq 2$, also sub-expression is not bounded by parameter:
+$\beta$-reduction `b := 2`, also sub-expression is not bounded by parameter `b`:
 
-$$
-P_{1,2} = \lambda 2. (\lambda f. ((f 1)2)) = \lambda f. ((f 1)2)
-$$
+```js
+(b => (f => (f(1))(b)))(2)
+= b => (f => (f(1))(2))
+= f => (f(1))(2)
+```
 
-Select $Head$ by applying the pair $P_{1,2}$
+Select `head` by applying the pair `p12`:
 
-$$
-Head (P_{1,2}) = (\lambda p. p (\lambda x.\lambda y. x))(P_{1,2}) = P_{1,2} (\lambda x.\lambda y. x)
-$$
-
-$$
-Head (P_{1,2}) = (\lambda f. ((f 1)2)) (\lambda x.\lambda y. x)
-$$
-
-$\beta$-reduction $f$ to higher-order function $True$:
-
-$$
-Head (P_{1,2}) = ((\lambda x.\lambda y. x)1)2) = （\lambda y.1)(2) = 1
-$$
+```js
+head(p12)
+= (p => p(x => (y => x)))(p12)
+= p12(x => (y => x))
+= (f => (f(1))(2))(x => (y => x))    // apply `true` to `f`
+= ((x => (y => x))(1))(2)
+= (y => 1)(2)
+= 1
+```
 
 Data objects constructed from pairs are called *list-structured data*.
 
@@ -1028,13 +1023,13 @@ We check three with currying :
 ```js
 const three
 = (plus(one))(two)
-= (m => (f => (x => one(f)(m(f)(x)))))(two)  // beta: apply one to n
-= (m => (f => (x => (z => f(z))(m(f)(x)))))(two) // alpha: x in one to z
-= (m => (f => (x => f(m(f)(x)))))(two) // beta: apply (m(f)(x)) to z
-= f => (x => f(two(f)(x))) // beta: apply two to m
-= f => (x => f((g => (t => g(g(t))))(f)(x))) // alpha: replace f,x in two
-= f => (x => f((t => f(f(t)))(x))) // beta: apply f to g
-= f => (x => f(f(f(x)))) // beta: apply x to t
+= (m => (f => (x => one(f)(m(f)(x)))))(two)         // beta: apply one to n
+= (m => (f => (x => (z => f(z))(m(f)(x)))))(two)    // alpha: x in one to z
+= (m => (f => (x => f(m(f)(x)))))(two)              // beta: apply (m(f)(x)) to z
+= f => (x => f(two(f)(x)))                          // beta: apply two to m
+= f => (x => f((g => (t => g(g(t))))(f)(x)))        // alpha: replace f,x in two
+= f => (x => f((t => f(f(t)))(x)))                  // beta: apply f to g
+= f => (x => f(f(f(x))))                            // beta: apply x to t
 ```
 
 `three` is a function, we can evaluate as non-negative number. Function `f` for recursive relationship is `+`, this is the operator. Starting number `x` would be zero: 
@@ -1049,12 +1044,32 @@ evaluate(three)
 = (x => (t => t + 1)((m => m + 1)(x + 1)))(0)
 = (x => (t => t + 1)((x + 1) + 1))(0)
 = (x => ((x + 1) + 1) + 1)(0)
-= ((0 + 1) + 1) + 1)
+= (((0 + 1) + 1) + 1)
 ```
 
-We do not reduce the result `((0 + 1) + 1) + 1)` to `3` intentionally to see the calculation steps.
+We do not reduce the result `(((0 + 1) + 1) + 1)` to `3` intentionally to see the calculation steps.
 
 ## 2.2  Hierarchical Data and the Closure Property
+
+Since everything is function/lambda-calculus, `pair` can not only pair a number but also a `pair`. As a consequence, pairs provide a universal building block from which we can construct all sorts of data structures.
+
+Binary tree node:
+
+```js
+pair(
+    2,    // value
+    pair(
+        pair(1, ...),    // left child
+        pair(3, ...)     // right child
+    )
+);
+```
+
+This is the ***closure property*** of `pair`: the ability to create `pair` whose elements are `pair`. Closure property permits us to create *hierarchical* structures.
+
+A note: Any part of a graph itself is a graph / Any part of a tree itself is a tree / Any part of a list itself is a list.
+
+Another note: closure -- set $S$, operation $f$, for all elements in set $\forall e \in S$, the operation result is closed: $f(e) \in S$. A tree $e$ from tree set ($S$), take a part of it ($f$), is still a tree ($f(e) \in S$).
 
 
 
