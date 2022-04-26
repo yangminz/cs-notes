@@ -12,9 +12,9 @@ first-class functions: function as variable. Lambda expression, functional abstr
 
 ## 1.1  The Elements of Programming
 
--   **primitive expressions**, which represent the simplest entities the language is concerned with,
--   **means of combination**, by which compound elements are built from simpler ones, and
--   **means of abstraction**, by which compound elements can be named and manipulated as units.
+- **primitive expressions**, which represent the simplest entities the language is concerned with,
+- **means of combination**, by which compound elements are built from simpler ones, and
+- **means of abstraction**, by which compound elements can be named and manipulated as units.
 
 ### 1.1.1  Expressions
 
@@ -39,10 +39,12 @@ Program environment: the memory to keep track of name-object pairs.
 
 Evaluate one operator combination:
 
-1.  Evaluate the operand expressions of the combination. Evaluation rule is **Recursive**!! Finally to leaf nodes (primitive):
-        -   the values of numerals are the numbers that they name
-        -   the values of names are the objects associated with those names in the environment
-2.  Apply the function that is denoted by the operator to the arguments that are the values of the operands.
+1. Evaluate the operand expressions of the combination. Evaluation rule is **Recursive**!! Finally to leaf nodes (primitive):
+   
+       -   the values of numerals are the numbers that they name
+       -   the values of names are the objects associated with those names in the environment
+
+2. Apply the function that is denoted by the operator to the arguments that are the values of the operands.
 
 `const x = 3;` is not a combination.
 
@@ -79,8 +81,8 @@ Substitution is not on text or string, but on **MEMORY**.
 
 #### Applicative order versus normal order
 
--   Applicative-order evaluation model: evaluate the arguments and then apply (js)
--   Normal-order evaluation model: fully expand and then reduce (memory costly)
+- Applicative-order evaluation model: evaluate the arguments and then apply (js)
+- Normal-order evaluation model: fully expand and then reduce (memory costly)
 
 ```
 f(5)
@@ -121,8 +123,8 @@ test(0, p());
 
 `p()` is infinite recursive that never returns.
 
--   Applicative Order: `test(x, y)`, `y = p()` would never be evaluated, never return.
--   Normal Order: `test(0, p()) ==> 0 === 0 ? 0 : p()`, short cut to `0`, return `0`.
+- Applicative Order: `test(x, y)`, `y = p()` would never be evaluated, never return.
+- Normal Order: `test(0, p()) ==> 0 === 0 ? 0 : p()`, short cut to `0`, return `0`.
 
 ### 1.1.7  Example: Square Roots by Newton's Method
 
@@ -157,7 +159,7 @@ The function `sqrt_iter`, on the other hand, demonstrates how iteration can be a
 #### Exercise
 
 ```js
-function conditional(predicate, then_clause, else_clause) {		    
+function conditional(predicate, then_clause, else_clause) {            
     return predicate ? then_clause : else_clause;
 } 
 ```
@@ -192,10 +194,10 @@ function square(y) {
 
 *Thus the parameter names of a function must be local to the body of the function.* If not, then not black box. -- Name isolation: parameter names are local to function body.
 
--   Bound
--   Bind
--   Free
--   Scope
+- Bound
+- Bind
+- Free
+- Scope
 
 #### Internal declarations and block structure
 
@@ -350,7 +352,9 @@ f(n) =    f(n - 1) * 1  // +1
 
 ### 1.2.3  Orders of Growth
 
-$$ k_1 \times f(n) \leq \Theta(f(n)) \leq k_2 \times f(n) $$
+$$
+k_1 \times f(n) \leq \Theta(f(n)) \leq k_2 \times f(n) 
+$$
 
 ### 1.2.4  Exponentiation
 
@@ -411,7 +415,9 @@ b^2 = b * b
 
 Binary Fibbonacci with power of matrix:
 
-$$ [F_n, F_{n-1}] \times [[1, 0], [1, 0]] = [F_{n+1}, F_{n}]$$
+$$
+[F_n, F_{n-1}] \times [[1, 0], [1, 0]] = [F_{n+1}, F_{n}]
+$$
 
 ```js
 function fib(n) {
@@ -526,7 +532,9 @@ The non-prime number meets the condition that $a^n \mod n = a \mod n$ is rare (*
 
 Miller-Rabin test (variant of Fermat test): For $a < n$ and $n$ prime: 
 
-$$a^{n-1} \mod n = 1$$
+$$
+a^{n-1} \mod n = 1
+$$
 
 code:
 
@@ -588,7 +596,9 @@ function sum(f, index, next, end) {
 
 Numerical integral:
 
-$$\int_a^b f = dx \cdot \left[ f\left(a + \frac{dx}{2}\right) + f\left(a + dx + \frac{dx}{2}\right) + f\left(a + 2dx + \frac{dx}{2}\right) + \cdots \right] $$
+$$
+\int_a^b f = dx \cdot \left[ f\left(a + \frac{dx}{2}\right) + f\left(a + dx + \frac{dx}{2}\right) + f\left(a + 2dx + \frac{dx}{2}\right) + \cdots \right] 
+$$
 
 Then
 
@@ -668,7 +678,9 @@ Functions used to express general methods of computation, independent of the par
 
 #### Finding roots of equations by the half-interval method
 
-$$f(x) = 0$$
+$$
+f(x) = 0
+$$
 
 ```js
 function average(x, y) {
@@ -705,7 +717,9 @@ search(x => x * x - 1, 0, 2);
 
 #### Finding fixed points of functions
 
-$$f(x) = x$$
+$$
+f(x) = x
+$$
 
 ```js
 function abs(x) {
@@ -743,14 +757,304 @@ function average_damp(f) {
 
 Elements with the fewest restrictions are said to have **first-class status**. Some of the "rights and privileges" of first-class elements are:
 
--   They may be referred to using names.
--   They may be passed as arguments to functions.
--   They may be returned as the results of functions.
--   They may be included in data structures.
+- They may be referred to using names.
+- They may be passed as arguments to functions.
+- They may be returned as the results of functions.
+- They may be included in data structures.
 
 Functions are first-class in JS.
 
 # Chapter 2.  Building Abstractions with Data
+
+**Compound data**: E.g. rational number (a numerator and a denominator).
+
+**Data abstraction**: how data objects are represented; how data objects are used.
+
+```js
+// a,b,x,y can be rational number, complex number, ...
+function linear_combination(a, b, x, y) {
+    return add(mul(a, x), mul(b, y));
+}
+```
+
+Data abstraction enables us to erect suitable *abstraction barriers* between different parts of a program.
+
+1. **Closure**: combine data objects with (primitive, compound) data objects.
+2. **Conventional Interfaces**: compound data objects can serve as interface.
+3. **Symbolic Expressions**: data composed of arbitrary symbols rather than numbers only.
+4. **Generic Operations**: handling different types of data - more powerful abstraction barriers. *data-directed programming*.
+
+## 2.1  Introduction to Data Abstraction
+
+Abstract data.
+
+### 2.1.1   Example: Arithmetic Operations for Rational Numbers
+
+For a rational number, can *construct*, can extract/**select** the numberator & denominator. Define the interface of **constructor** and **selector**:
+
+- `make_rat(n, d)` returns the rational number whose numerator is the integer nn and whose denominator is the integer `d`.
+- `numer(x)` returns the numerator of the rational number `x`.
+- `denom(x)` returns the denominator of the rational number `x`.
+
+With interface for constructor & selector, can implement add/sub/multiple/divide/test operations:
+
+```js
+function add_rat(x, y) {
+    return make_rat(numer(x) * denom(y) + numer(y) * denom(x),
+                    denom(x) * denom(y));
+}
+function sub_rat(x, y) {
+    return make_rat(numer(x) * denom(y) - numer(y) * denom(x),
+                    denom(x) * denom(y));
+}
+function mul_rat(x, y) {
+    return make_rat(numer(x) * numer(y),
+                    denom(x) * denom(y));
+}
+function div_rat(x, y) {
+    return make_rat(numer(x) * denom(y),
+                    denom(x) * numer(y));
+}
+function equal_rat(x, y) {
+    return numer(x) * denom(y) === numer(y) * denom(x);
+}
+```
+
+#### Pairs
+
+JS pair:
+
+```js
+const x = pair(1,2);
+head(x); // 1
+tail(x); // 2
+```
+
+This is the pair implementation of lambda calculus. Lambda expression has 3 forms:
+
+1. $x$: Variable. Representing the value.
+2. $(\lambda x. E)$: Abstraction. Definition of function. Variable $x$ is the bound in expression.
+3. $(E F)$: Application. Apply lambda term $F$ to expression $E$.
+
+The reduction operations:
+
+1. $(\lambda x. E[x]) \rightarrow (\lambda y. E[y])$: $\alpha$-conversion, rename the bound variables $x$ to $y$ to avoid name confliction.
+2. $((\lambda x.E)F) \rightarrow (E[x\coloneqq F])$: $\beta$-reduction, replace the bound variables $x$ with expression $F$.
+
+Then a pair
+
+$$
+Pair \coloneqq (\lambda a. (\lambda b. (\lambda f. ((f a)b))))
+$$
+
+$f$ is the operator for the pair. Then select:
+
+$$
+Head \coloneqq \lambda p. p (\lambda x.\lambda y. x)
+$$
+
+$$
+Tail \coloneqq \lambda p. p (\lambda x.\lambda y. y)
+$$
+
+While we can take these 2 higher-order function as bool:
+
+$$
+True \coloneqq \lambda x.\lambda y. x
+$$
+
+$$
+False \coloneqq \lambda x.\lambda y. y
+$$
+
+Then get head operation:
+
+$$
+P_{1,2} = (P(1))(2) = ((\lambda a. (\lambda b. (\lambda f. ((f a)b))))(1))(2)
+$$
+
+$\beta$-reduction $a \coloneqq 1$:
+
+$$
+P_{1,2} = ((\lambda 1. (\lambda b. (\lambda f. ((f 1)b)))))(2)
+$$
+
+Then the sub-expression $(\lambda b. (\lambda f. ((f 1)b)))$ is no longer bounded by variable $a$, so the parameter can be removed:
+
+$$
+P_{1,2} = (\lambda b. (\lambda f. ((f 1)b)))(2)
+$$
+
+$\beta$-reduction $b \coloneqq 2$, also sub-expression is not bounded by parameter:
+
+$$
+P_{1,2} = \lambda 2. (\lambda f. ((f 1)2)) = \lambda f. ((f 1)2)
+$$
+
+Select $Head$ by applying the pair $P_{1,2}$
+
+$$
+Head (P_{1,2}) = (\lambda p. p (\lambda x.\lambda y. x))(P_{1,2}) = P_{1,2} (\lambda x.\lambda y. x)
+$$
+
+$$
+Head (P_{1,2}) = (\lambda f. ((f 1)2)) (\lambda x.\lambda y. x)
+$$
+
+$\beta$-reduction $f$ to higher-order function $True$:
+
+$$
+Head (P_{1,2}) = ((\lambda x.\lambda y. x)1)2) = （\lambda y.1)(2) = 1
+$$
+
+Data objects constructed from pairs are called *list-structured data*.
+
+### Representing rational numbers
+
+Implement the interfaces:
+
+```js
+function make_rat(n, d) {
+    const g = gcd(n, d);
+    return pair(n / g, d / g);
+} 
+function numer(x) { return head(x); }
+function denom(x) { return tail(x); }
+numer(make_rat(2, 3));
+```
+
+### 2.1.2   Abstraction Barriers
+
+Abstraction barriers isolate different "levels" of the system. Maintain the flexibility to consider alternate implementations. E.g. another implementation, `gcd` when get: 
+
+```js
+function make_rat(n, d) {
+    return pair(n, d);
+}
+function numer(x) {
+    const g = gcd(head(x), tail(x));
+    return head(x) / g;
+}
+function denom(x) {
+    const g = gcd(head(x), tail(x));
+    return tail(x) / g;
+} 
+```
+
+### 2.1.3   What Is Meant by Data?
+
+Data: constructors, selectors, conditions of these functions. E.g. for rational number, the condition is: For any `x = make_rat(n, d)`, then `numer(x)/denom(x) == n/d`.
+
+Define `pair` in this way: if `z = pair(x, y)`, then `head(z) == x` and `tail(z) == y`. Any triple of functions `<pair, head, tail>` satisfies the condition can be used to implement `pair`:
+
+```js
+function pair(x, y) {
+    function dispatch(m) {
+        return m === 0 
+               ? x
+               : m === 1 
+               ? y
+               : error(m, "argument not 0 or 1 -- pair");
+    }
+    return dispatch;          
+}
+function head(z) { return z(0); }
+
+function tail(z) { return z(1); } 
+```
+
+The functional representation of `pair` is above. Behind is lambda-calculus. `dispatch` is True/False selector.
+
+#### Exercise
+
+Another implementation:
+
+```js
+function pair(x, y) {
+    return f => f(x, y);
+}
+
+function head(z) {
+    return z((p, q) => p);
+}
+
+function tail(z) {
+    return z((p, q) => q);
+}
+```
+
+**Church numerals**
+
+Integer system without number but only functions:
+
+```js
+const zero = f => (x => x);
+
+function add_1(n)
+{
+    return f => (x => f(n(f)(x)));
+}
+```
+
+And define one and two:
+
+```js
+const one = f => (x => f(x));
+const two = f => (x => f(f(x)));
+```
+
+Define plus of non-negative integers, and we get three as one plus two:
+
+```js
+function plus(n, m)
+{
+    return f => (x => n(f)(m(f)(x)));
+}
+const three = plus(one, two);
+```
+
+Note that this function `plus` is **currying** function:
+
+```js
+plus = (n, m) => (f => (x => n(f)(m(f)(x))));
+const three = plus(one, two);
+
+plus = n => (m => (f => (x => n(f)(m(f)(x)))));
+const three = (plus(one))(two);
+```
+
+We check three with currying :
+
+```js
+const three
+= (plus(one))(two)
+= (m => (f => (x => one(f)(m(f)(x)))))(two)  // beta: apply one to n
+= (m => (f => (x => (z => f(z))(m(f)(x)))))(two) // alpha: x in one to z
+= (m => (f => (x => f(m(f)(x)))))(two) // beta: apply (m(f)(x)) to z
+= f => (x => f(two(f)(x))) // beta: apply two to m
+= f => (x => f((g => (t => g(g(t))))(f)(x))) // alpha: replace f,x in two
+= f => (x => f((t => f(f(t)))(x))) // beta: apply f to g
+= f => (x => f(f(f(x)))) // beta: apply x to t
+```
+
+`three` is a function, we can evaluate as non-negative number. Function `f` for recursive relationship is `+`, this is the operator. Starting number `x` would be zero: 
+
+```js
+function evaluate(num_func) {
+    return num_func(n => n + 1)(0);
+}
+evaluate(three)
+= (three(n => n + 1))(0)
+= (x => (t => t + 1)((m => m + 1)((n => n + 1)(x))))(0)
+= (x => (t => t + 1)((m => m + 1)(x + 1)))(0)
+= (x => (t => t + 1)((x + 1) + 1))(0)
+= (x => ((x + 1) + 1) + 1)(0)
+= ((0 + 1) + 1) + 1)
+```
+
+We do not reduce the result `((0 + 1) + 1) + 1)` to `3` intentionally to see the calculation steps.
+
+## 2.2  Hierarchical Data and the Closure Property
 
 
 
@@ -762,8 +1066,8 @@ list-structured memory: list-structured data
 
 2 considerations:
 
-1.  representing Lisp pair with storage and address
-2.  memory management
+1. representing Lisp pair with storage and address
+2. memory management
 
 Lisp: automatic storage allocation. Purpose: abstraction for +inf memory capacity.
 
@@ -797,9 +1101,9 @@ request(object)
 
 #### Implementing the primitive list operations
 
-1.  identify memory vectors
-2.  memory primitive operations
-3.  pointer arithemetic does not change type
+1. identify memory vectors
+2. memory primitive operations
+3. pointer arithemetic does not change type
 
 `free` register holds a pair pointer containing the next available index. use it to find the next free location. other implementation: free list.
 
