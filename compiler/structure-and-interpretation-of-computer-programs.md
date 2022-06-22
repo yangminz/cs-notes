@@ -1071,6 +1071,127 @@ A note: Any part of a graph itself is a graph / Any part of a tree itself is a t
 
 Another note: closure -- set $S$, operation $f$, for all elements in set $\forall e \in S$, the operation result is closed: $f(e) \in S$. A tree $e$ from tree set ($S$), take a part of it ($f$), is still a tree ($f(e) \in S$).
 
+### 2.2.1   Representing Sequences
+
+Sequence/linked list: a chain of pairs:
+
+```js
+pair(1, 
+     pair(2, 
+          pair(3, 
+               pair(4, null))));
+// [1, [2, [3, [4, null]]]] -- box notation
+// [1, 2, 3, 4] -- list notation
+```
+
+List in js:
+
+```js
+list(1,2,3,4);
+```
+
+#### List operations
+
+Reference $n^{th}$ element:
+
+```js
+function list_ref(items, n) {
+    return n === 0
+           ? head(items)
+           : list_ref(tail(items), n - 1);
+} 
+```
+
+Get length:
+
+```js
+function length(items) {
+    return is_null(items)
+           ? 0
+           : 1 + length(tail(items));
+} 
+```
+
+#### Mapping over lists
+
+`map` as higher-order function, higher level of abstraction in dealing with lists:
+
+```js
+function map(fun, items) {
+    return is_null(items)
+           ? null
+           : pair(fun(head(items)), 
+                  map(fun, tail(items)));
+}
+map(abs, list(-10, 2.5, -11.6, 17));
+// [10, [2.5, [11.6, [17, null]]]]
+```
+
+#### Exercise
+
+**Currying** named after Haskell Brooks Curry to deal with multiple parameters: apply the first argument to get a returned function, then apply the second parameter to this function.
+
+```js
+function plus_curried(x)
+{
+    return (y => x + y);
+}
+```
+
+`for_each` is similar to `map`, applies the function to elements in turn from left to right.
+
+```js
+function for_each(fun, items) {
+    if (is_null(items)){
+        return undefined;
+    } else {
+        fun(head(items));
+        for_each(fun, tail(items));
+    }
+}
+```
+
+### 2.2.2   Hierarchical Structures
+
+> Recursion is a natural tool for dealing with tree structures, since we can often reduce operations on trees to operations on their branches, which reduce in turn to operations on the branches of the branches, and so on, until we reach the leaves of the tree.
+
+#### Mapping over trees
+
+```js
+function scale_tree(tree, factor) {
+    return is_null(tree)
+           ? null
+           : ! is_pair(tree)
+           ? tree * factor
+           : pair(scale_tree(head(tree), factor), 
+                  scale_tree(tail(tree), factor));
+} 
+```
+
+#### Exercise
+
+Get all subsets of a list:
+
+```js
+function subsets(s) {
+    if (is_null(s)) {
+        return list(null);
+    } else {
+        const rest = subsets(tail(s));
+        return append(rest, map(x => pair(head(s), x), rest));
+    }
+} 
+```
+
+### 2.2.3   Sequences as Conventional Interfaces
+
+Another design principle: **conventional interfaces**.
+
+-   Enumerator: generate a signal
+-   Filter: preserve only needed
+-   Map: appy the function to each element
+-   Accumulator: combine the result per element
+
 
 
 # Chapter 5. Computing with Register Machines
