@@ -60,8 +60,8 @@ virtual memory: collection of areas or segments. each existing virtual page is c
 
 MMU triggers a page fault when translate virtual address `vaddr`. control transfered to kernel's page fault handler:
 
-1.  Is `vaddr` legal? Check `vm_area_structs` list. If illegal, issue **Segmentation Fault**, because process is accessing a nonexistent page. It's fatal, program exits. use red-black to do fast search, because `mmap` may create many many areas.
-2.  Is `mem[vaddr]` readable or writeable? Check if the process is privileged to perform the operation. E.g. write to `.text` segment ==> **Protection Fault**. program exits. *remember `fork`, `vm_area_struct` r/w but `page_table` ro, then demand paging.*
+1.  Is `vaddr` legal? Check `vm_area_structs` list. If illegal, issue **Segmentation Fault**, because process is accessing a nonexistent page. It's fatal, program exits. use red-black to do fast search, because `mmap` may create many many areas. -- VMA is only used in this case.
+2.  Is `mem[vaddr]` readable or writeable? Check if the process is privileged to perform the operation. E.g. write to `.text` segment ==> **Protection Fault**. program exits. *remember `fork`, `vm_area_struct` r/w but `page_table` ro, then demand paging.* -- Check page table entry/page descriptor.
 3.  Finally, without segmentation fault and protection fault, a normal page fault. If clean, discardable. If dirty, backed by file or swap space? Be careful here.
 
 ## 9.8 Memory Mapping

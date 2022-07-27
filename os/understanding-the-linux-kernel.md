@@ -290,7 +290,299 @@ Kernel thread does not access linear address below `0xc0000000`. So kernel threa
 
 When kernel process updates page table entry in high space, it should update the correspoinding entry in all processes' page tables. It's costy operation, therefore use deferred approach: when high address remapped, update a canonical set of page tables rooted at `swapper_pg_dir` master kernel PGD: `init_mm->pgd`.
 
+## 9.3 Memory Regions
+
+`vm_area_struct` -- memory region descriptor, identifies a linear address interval.
+
+`vm_start, vm_end`, first linear address inside/outside the interval: `end - start` is the length of interval. `vm_mm` pionts back to `mm_struct`.
+
+Regions of one process does not overlap, kernel tries to merge regions when possible.
+
+................
+
+`mm_struct.vm_area_struct` is processor-independent, abstract memory regions, aka mappings. `mm_struct.pgd` is processor-specific page table. 
+
+When loads a new program, kernel setup VMAs according to the segments in executable file (ELF). VMA can generate page table. Kernel will update page table by looking at VMAs. 
+
+On page fault, kernel check VMAs.
+
+```assembly
+section .data
+    buffer db "...", 0xA
+section .text
+    global _start
+    _start:
+        mov rbx, 0
+    loop:
+        cmp rbx, 0xFFFFFFFFFFFFFFFF
+        je end
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, buffer
+        mov rdx, 4
+        syscall
+        add rbx, 1
+        jmp loop
+    end:
+```
+
+Compile: `nasm x.asm -f elf64 -o x.o`
+
+```
+x.o:     file format elf64-x86-64
+
+
+Disassembly of section .data:
+
+0000000000000000 <buffer>:
+   0:   2e                      cs
+   1:   2e                      cs
+   2:   2e                      cs
+   3:   0a                      .byte 0xa
+
+Disassembly of section .text:
+
+0000000000000000 <_start>:
+   0:   bb 00 00 00 00          mov    $0x0,%ebx
+
+0000000000000005 <loop>:
+   5:   48 83 fb ff             cmp    $0xffffffffffffffff,%rbx
+   9:   74 21                   je     2c <end>
+   b:   b8 01 00 00 00          mov    $0x1,%eax
+  10:   bf 01 00 00 00          mov    $0x1,%edi
+  15:   48 be 00 00 00 00 00    movabs $0x0,%rsi
+  1c:   00 00 00
+  1f:   ba 04 00 00 00          mov    $0x4,%edx
+  24:   0f 05                   syscall
+  26:   48 83 c3 01             add    $0x1,%rbx
+  2a:   eb d9                   jmp    5 <loop>
+```
+
+Link: `ld x.o`. This will generate executable `a.out` without glibc.
+
+```
+a.out:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000401000 <_start>:
+  401000:       bb 00 00 00 00          mov    $0x0,%ebx
+
+0000000000401005 <loop>:
+  401005:       48 83 fb ff             cmp    $0xffffffffffffffff,%rbx
+  401009:       74 21                   je     40102c <end>
+  40100b:       b8 01 00 00 00          mov    $0x1,%eax
+  401010:       bf 01 00 00 00          mov    $0x1,%edi
+  401015:       48 be 00 20 40 00 00    movabs $0x402000,%rsi
+  40101c:       00 00 00
+  40101f:       ba 04 00 00 00          mov    $0x4,%edx
+  401024:       0f 05                   syscall
+  401026:       48 83 c3 01             add    $0x1,%rbx
+  40102a:       eb d9                   jmp    401005 <loop>
+
+Disassembly of section .data:
+
+0000000000402000 <buffer>:
+  402000:       2e                      cs
+  402001:       2e                      cs
+  402002:       2e                      cs
+  402003:       0a                      .byte 0xa
+```
+
+The VMAs
+
+```
++-----------------------------+--------+----------+---------------------+------------+----------------------+
+| <address start-address end> | <mode> | <offset> | <major id:minor id> | <inode id> | <file path>          |
++-----------------------------+--------+----------+---------------------+------------+----------------------+
+| 00400000-00401000           | r--p   | 00000000 | 08:20               | 50358      | /home/yangminz/a.out | page [0]
+| 00401000-00402000           | r-xp   | 00001000 | 08:20               | 50358      | /home/yangminz/a.out | page [1] .text
+| 00402000-00403000           | rw-p   | 00002000 | 08:20               | 50358      | /home/yangminz/a.out | page [2] .data
+| 7ffc4380c000-7ffc4382e000   | rw-p   | 00000000 | 00:00               | 0          | [stack]              | page [3]
+| 7ffc439da000-7ffc439de000   | r--p   | 00000000 | 00:00               | 0          | [vvar]               |
+| 7ffc439de000-7ffc439df000   | r-xp   | 00000000 | 00:00               | 0          | [vdso]               |
++-----------------------------+--------+----------+---------------------+------------+----------------------+
+```
+
+4 permissions in mode: read, write, execupte, private/shared
+
+................
+
+### Memory Region Data Structure
+
+list + red black tree. Most processess use very few regions. But large applications, e.g. object-oriented databases or debuggers for `malloc` may have even 1k+ regions. 
+
+RBT: locate a region including a specific address;
+Linked List: scan the whole set of regions.
+
+### Memory Region Access Rights
+
+The relation between a page and a memory region.
+
+Each memory region consists of a set of pages that have consecutive page numbers.
+
+A page can have:
+
+1.  Flags `R/W, Present, User/Supervisor` stored in page table entry. Used by `80x86` hardware to check **whether the requested kind of addressing can be performed**.
+2.  Flags stored in `page` descriptor (reversed mapping). Used by Linux for many different purposes.
+
+Now, *a third kind of flag*: associated with the pages of a region, stored in `vm_area_struct.vm_flags`. Some tell the page information in the region, e.g., what they contain and what rights the process has to access. Other describe the region, e.g., how it can grow. E.g., controls pages in region to be read but not executed.
+
+This is a protection scheme: Read, Write, Execute access rights should be duplicated in corresponding page table entries. ***The page access rights dictate what kinds of access should generate a Page Fault exception.*** Page Fault handler will figure out what caused the Page Fault.
+
+However, translating region's access right into page protection bits is not straightforward: 
+
+1.  Copy On Write: Page fault even when access is allowed by region. 
+2.  `80x86` page table have just 2 protection bits: R/W and U/S.
+
+For linux compiled without PAE, to overcome `80x86` limitation:
+
+1.  Read <==> Execute
+2.  Write ==> Read
+
+For linux compiled with PAE:
+
+1.  Execute ==> Read
+2.  Write ==> Read
+
+For COW, page frame is write-protected whenever the page must not be shared by several processes.
+
+Then, `Read, Write, Execute, Shared`, the 4 access rights (2^4 = 16) combinations can be scaled down.
+
+### Memory Region Handling
+
+`find_vma()` to find the closet region to a given address in memory descriptor. Use RBT to search.
+
+`insert_vm_struct()` to insert a vma to linked list & rbt. 
+
 ## 9.4 Page Fault Exception Handler
+
+Handler must distinguish exceptions caused by programming errors from those caused by a reference to a page that legitimately belongs to the process address space but simply hasn’t been allocated yet.
+
+```json
+{
+    "Access to kernel space?":
+    {
+        "Yes": ["Access in Kernel Mode?"],
+        "No": ["In Interrupt, softirq, critical region, or kernel thread?"]
+    },
+    "Access in Kernel Mode?":
+    {
+        "Yes": ["Noncontiguous memory area address?", "vmalloc_fault"],
+        "No": ["Access in User Mode?", "bad_area"]
+    },
+    "Noncontiguous memory area address?":
+    {
+        "Yes": ["Kernel page table entry fixup"],
+        "No": ["Address is a wrong system call parameter?", "no_context"]
+    },
+    "In Interrupt, softirq, critical region, or kernel thread?":
+    {
+        "Yes": ["Address is a wrong system call parameter?", "no_context"],
+        "No": ["Address in a memory region?"]
+    },
+    "Address in a memory region?":
+    {
+        "Yes": ["Write access?", "good_area"],
+        "No": ["Address could belong to User Mode stack?"]
+    },
+    "Address could belong to User Mode stack?":
+    {
+        "Yes": ["Write access?", "good_area"],
+        "No": ["Access in User Mode?", "bad_area"]
+    },
+    "Write access?":
+    {
+        "Yes": ["Region is writeable?"],
+        "No": ["Page is present?"]
+    },
+    "Region is writeable?":
+    {
+        "Yes": ["Demand Paging and/or Copy On Write"],
+        "No": ["Access in User Mode?", "bad_area"]
+    },
+    "Page is present?":
+    {
+        "Yes": ["Access in User Mode?", "bad_area"],
+        "No": ["Region is readable or executable?"]
+    },
+    "Region is readable or executable?":
+    {
+        "Yes": ["Demand paging"],
+        "No": ["Access in User Mode?", "bad_area"]
+    },
+    "Access in User Mode?":
+    {
+        "Yes": ["Send SIGSEGV", "do_sigbus"],
+        "No": ["Address is a wrong system call parameter?", "no_context"]
+    },
+    "Address is a wrong system call parameter?":
+    {
+        "Yes": ["Fixup code (typically send SIGSEGV)"],
+        "No": ["Kill process and kernel Oops"]
+    }
+}
+```
+
+### Demand Paging
+
+Defer page frame allocation until the last possible moment—until the process attempts to address a page that is not present in RAM, thus causing a Page Fault exception
+
+Motivation: process does not need to address all addresses in the address space. Some addrsses may never be used. V.s global allocation: assign all frames to process from start to termination.
+
+Price: system overhead. Each page fault induced by Demand Paging will waste CPU cycles. But locality will help.
+
+When page fault handler assign a new frame to process, how is it initialized:
+
+1.  `PTE.value == 0` Page table entry is all zero: (1)page was never accessed and does not map a disk file; (2) page linearly maps a disk file. -- `pte_none == 1`
+2.  `PTE.present == 0 && PTE.dirty == 1`: page belongs to a non-linkear disk file mapping. -- `pte_file == 1`
+3.  `PTE.value != 0 && PTE.present == 0 && PTE.dirty == 0`: page was already accessed but content is on disk.
+
+```c
+if (pte.present == 0)
+{
+    if (pte.value == 0)
+    {
+        // case 1
+        // may do anonymous page mapping, handle read and write differently
+        return do_no_page(mm, vma, address, write_access, pte, pmd);
+    }
+    else
+    {
+        if (pte.dirty == 1)
+        {
+            // case 2
+            return do_file_page(mm, vma, address, write_access, pte, pmd);
+        }
+        else
+        {
+            // case 3
+            return do_swap_page(mm, vma, address, write_access, pte, pmd);
+        }
+    }
+}
+```
+
+### Copy On Write
+
+Old `fork` takes time to copy the whole address space:
+
+1.  Allocate frames for page tables of child
+2.  Allocate frames for pages of child
+3.  Initialize page tables of child
+4.  Copy pages of parent to child
+
+COW: instead of duplicating frames, they are shared between parent and child. As long as they are shared, they cannot be modified. The original page frame **remains write-protected**: when the other process tries to write into it, the kernel checks whether the writing process is the only owner of the page frame; in such a case, it makes the page frame writable for the process.
+
+**Reversed mapping: `page._count` to keep track of sharing processes of one frame.**
+
+1.  Derive the page descriptor of frame referenced by PTE
+2.  Determine if the page must be duplicated: if only one process owns the page, no COW. Check by `_count` field in page descriptor. (`_count == 0` indicates single proecss).
+3.  Copy the content of old page to the new. New page is allocated by `alloc_page`. To avoid race, use `get_page` to increase `_count` of old.
+4.  Write zero if old page is zero page for better performance.
+5.  Write frame address to PTE, update TLB.
+
 
 ### Handling Noncontiguous Memory Area Accesses
 
