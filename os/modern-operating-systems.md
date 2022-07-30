@@ -118,6 +118,25 @@ provide an alternative model for I/O: **files can be accessed as a big byte arra
 
 ## 3.6 Implementation Issues
 
+### 3.6.1 Operating System Involvement with Paging
+
+4 cases of page related work:
+
+1.  process creation
+2.  process execution
+3.  process fault
+4.  process termination
+
+Page table need not to be resident when the process is swapped out but has to be in memory when the process is running.
+
+Creation: prepare swap area on disk. Info about page table and swap area must be recorded in the process table.
+
+Execution: MMU reset for the new process and TLB flushed. Copy the address of the page table of the new process to hardware registers. 
+
+Page fault: OS read out hardware registers to find which virtual address caused the fault. Compute which page is needed and locate that on disk. Find page frame to put the new page, evicting old if needed. Back up PC so the faulting instruction would be executed again.
+
+Termination: Release the page table, pages, and swap addresses. 
+
 ### 3.6.2 Page Fault Handling
 
 1.  MMU traps to kernel. Push PC to kstack, save other info to special registers.
