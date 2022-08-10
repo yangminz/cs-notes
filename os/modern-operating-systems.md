@@ -108,7 +108,27 @@ execution: thread: registers, program counter, stack, etc.
 
 # Chapter 3. Memory Management
 
+## 3.4 Page Replacement Algorithms
+
+### 3.4.8 The Working Set Page Replacement Algorithm
+
+Ideally, processes started with no page in memory. When CPU tries to fetch the first instruction, page fault, bring in the page containing the first instruction. *This is **Demand Paging** because pages are loaded only on demand, not in advance*. Based on **locality of reference**.
+
+The set of pages that a process is currently using is **working set**. Good case: entire working set is in memory. Otherwise, **thrashing**.
+
 ## 3.5 Design Issues for Paging Systems
+
+### 3.5.5 Shared Page
+
+Example: Run the same progam at the same time. RO pages (.text) are sharable, but RW data pages should be private.
+
+A and B share the same code pages. A evicted code page, B will get page faults. So it's necessary to detect the pages. *Searching all page tables of all processes to see if a page is shared is too expensive, so a data structure `page_descriptor._count` is necessary to keep track of shared pages. Especially if the shared is one individual page instead of an entire page table.*
+
+`fork` in UNIX: parent and child share both text and data, each has their own page table but points to the same set of frames. Thus no copying of pages is done at fork time. But all the frames are marked as READ ONLY. When one process updates a memory workd, violation of READ ONLY protection causes a trap to operating system.
+
+(READ ONLY is one flag in page table entries. And we may need to flush TLB so the table entry would be read.)
+
+Then OS detects it's COW and copy a private page. Both copies are now set to R/W in page table entries. COW is marked in `vm_area_structs`.
 
 ### 3.5.7 Mapped Files
 
@@ -117,6 +137,25 @@ shared lib: a special case of memory-mapped files. **syscall to map a file onto 
 provide an alternative model for I/O: **files can be accessed as a big byte array in memory**.
 
 ## 3.6 Implementation Issues
+
+### 3.6.1 Operating System Involvement with Paging
+
+4 cases of page related work:
+
+1.  process creation
+2.  process execution
+3.  process fault
+4.  process termination
+
+Page table need not to be resident when the process is swapped out but has to be in memory when the process is running.
+
+Creation: prepare swap area on disk. Info about page table and swap area must be recorded in the process table.
+
+Execution: MMU reset for the new process and TLB flushed. Copy the address of the page table of the new process to hardware registers. 
+
+Page fault: OS read out hardware registers to find which virtual address caused the fault. Compute which page is needed and locate that on disk. Find page frame to put the new page, evicting old if needed. Back up PC so the faulting instruction would be executed again.
+
+Termination: Release the page table, pages, and swap addresses. 
 
 ### 3.6.2 Page Fault Handling
 
