@@ -1,6 +1,8 @@
-# Blockchain Playlist
+# Blockchain
 
 ## What is Blockchain
+
+By Sir John Hargrave, Evan Karnoupakis
 
 The simple definition: the internet of money. Money: not only cash, also stocks, etc. Internet: share info, blockchain: share value. Share money ~= send email.
 
@@ -73,6 +75,18 @@ Where do my stakeholders need to share value? Units of value -- coins or tokens.
 - Creating a blockchain is like creating a mini-economy. Mastering the building blocks of blockchain is what you’ll learn next.
 
 ## Blockchain Building Blocks
+
+Vitalik Buterin: Ethereum, a simple scripting language allow create new blockchain apps. The money, Ether.
+
+### The Beating Heart of Blockchain
+
+Blockchain: many copies, many computers. Decentralized Ledger Technology (DLT) is different from cloud computing. (Excel, Google Sheet (cloud computing but centralized), DLT).
+
+> Decentralized ledger technology: The beating heart of blockchain. It allows us to keep all the transactions synchronized, across a distributed network of computers.
+
+Blockchain: logically centralized - only one ledger. Organizationally decentralized that ledger is not stored in any one central location. Instead, identical copies on every node.
+
+
 
 
 
