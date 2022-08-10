@@ -108,7 +108,27 @@ execution: thread: registers, program counter, stack, etc.
 
 # Chapter 3. Memory Management
 
+## 3.4 Page Replacement Algorithms
+
+### 3.4.8 The Working Set Page Replacement Algorithm
+
+Ideally, processes started with no page in memory. When CPU tries to fetch the first instruction, page fault, bring in the page containing the first instruction. *This is **Demand Paging** because pages are loaded only on demand, not in advance*. Based on **locality of reference**.
+
+The set of pages that a process is currently using is **working set**. Good case: entire working set is in memory. Otherwise, **thrashing**.
+
 ## 3.5 Design Issues for Paging Systems
+
+### 3.5.5 Shared Page
+
+Example: Run the same progam at the same time. RO pages (.text) are sharable, but RW data pages should be private.
+
+A and B share the same code pages. A evicted code page, B will get page faults. So it's necessary to detect the pages. *Searching all page tables of all processes to see if a page is shared is too expensive, so a data structure `page_descriptor._count` is necessary to keep track of shared pages. Especially if the shared is one individual page instead of an entire page table.*
+
+`fork` in UNIX: parent and child share both text and data, each has their own page table but points to the same set of frames. Thus no copying of pages is done at fork time. But all the frames are marked as READ ONLY. When one process updates a memory workd, violation of READ ONLY protection causes a trap to operating system.
+
+(READ ONLY is one flag in page table entries. And we may need to flush TLB so the table entry would be read.)
+
+Then OS detects it's COW and copy a private page. Both copies are now set to R/W in page table entries. COW is marked in `vm_area_structs`.
 
 ### 3.5.7 Mapped Files
 
