@@ -236,6 +236,33 @@ another way: locking
 
 # Chapter 13. The Abstraction: Address Spaces
 
+# Chapter 23. Complete Virtual Memory Systems
+
+Key elements: page-table designs, interactions with TLB, page replacement strategies, etc.
+
+Complex query when put user page tables in kernel virtual memory. 
+
+Page 0 is marked inaccessible to support **null-pointer** access detection. When process access virtual address `0`, page table founds it's invalid access, transfers control back to OS.
+
+The kernel is mapped into each address space. ==> Kernel appears almost as a library to applications, a protected one.
+
+clean-page free list, dirty-page free list.
+
+Clustering: group large batches of pages together.
+
+Lazy optimizations: 
+
+1. **Demand zeroing**: E.g., when heap requests one new page, put an entry in page table and *marks it inaccessible*. Trap to OS, OS finds it's a demand-zero page, then find a physical frame and zero it. 
+2. **Copy on write**: When OS needs to copy one page from one address space to another, instead of copying, map it into target address space and mark it **read-only** in **both address spaces**. When write, OS finds it's a COW page, and then allocate new page and make a private copy.
+
+Linux kernel virtual addresses: 2 types
+
+1.  **Kernel Logical Addresses** - the normal virtual address space of the kernel. `kmalloc`. Most of kernel data structures: page table, per-process kernel stacks, etc. are here. CANNOT be swapped to disk. 
+
+Direct mapping between kernel *logical* address and *first portion* of physical memory. (Logical `0xC0000000`, Physical `0x00000000`), (Logical `0xC0000FFF`, Physical `0x00000FFF`). Continous. I/O transfer to and from devices via **Directory Memory Access**.
+
+2.  **Kernel Virtual Addresses** - `vmalloc`. Usually not contiguous, kernel virtual page may map to non-contiguous physical frames. Easier to allocate.
+
 # Chapter 26. Concurrency and Threads
 
 # Chapter 28. Locks
