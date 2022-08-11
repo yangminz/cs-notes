@@ -1,0 +1,81 @@
+# .Net Memory Performance Analysis
+
+By Maoni Stephens: [blog](https://github.com/Maoni0/mem-doc/blob/master/doc/.NETMemoryPerformanceAnalysis.md)
+
+## Picking the right approaches for doing performance analysis
+
+Which part is most worthwhile to optimize?
+
+Top level aspects to optimize:
+
+-   Memory footprint, e.g., need to run as many instances on the same machine as possible
+-   Throughput, e.g., need to process as many requests as possible during a certain amount of time
+-   Tail latency, e.g., need to meet a certain SLA for latency
+
+Common problem: test environment is different from prod.
+
+Being able to measure effects from fixes/workarounds.
+
+Example: improve P95 request latency (The 85th percentile request latency). Average request latency < 3ms but P95 = 70ms. Then for requests around P95, calculate GC impact:
+
+```
+  Total GC pauses observed during P95 requests
+-------------------------------------------------
+        Total latency of P95 requests
+```
+
+If impact ratio < 10%, then GC is not main contributor.
+
+## Memory fundamentals
+
+### Virtual memory fundamentals
+
+**VMM (Virtual Memory Manager)**: provides each process with its own virtual address space even though all processes on the same machine share the physical memory (and the page file if you have one).
+
+Virutal address area (a contiguous range of virtual addresses) can be in different states:
+
+-   Free
+-   Reserved: Mark the area for the requestor's own use. The area cannot be used to satisfy other reserve requests. Cannot write data in the area.
+-   Committed: System will back up the area with physical storage so the area can be used.
+
+Another states:
+
+-   Private: only used by current process. All GC related memory usage is private.
+-   Shared: can be shared by other processes.
+
+Address space can have holes (fragmented). When commit, VMM find enough physical storage. When write. VMM find a 4KB page to physical memory to store data and add the page to **working set**.
+
+When not enough physical frames, swap out to page files. Slow operation. *When in steady state, usually the actively used page are in working set. GC will avoid swapping.*
+
+### GC Fundamentals
+
+**GC heap is only one kind of memory usage in the process.** But for the majority of .NET apps, GC is the most part. Thus total private committed bytes =~ GC heap's committed bytes (GC is heap). But if there is significant discrepancy, then should consider other parts.
+
+**GC is per process but is aware of physical memory load on the machine.** GC recognize a certan load percentage as high memory load situation. Above that, do more aggressively, e.g., do more full blocking GCs. Use `runtimeconfig.json::System.GC.HighMemoryPercent` to update it and update heap size. 
+
+GCs are triggered mostly due to allocations. Or by user process's calling `GC.Collect`.
+
+Most expensive of allocation (without GC) is memory clearing: fill with zeros. But it's difficult to measure allocation costs because so many of them: Sampling, Tracing, etc.
+
+**Allocation Budget**: The amount of allocations before the next GC is triggered/how much allocation GC allows before it triggers the next one. E.g., have 3GB heap before GC, then budget is 3GB.
+
+Generational GC: Gen0 - youngest, gen2 - old generation, gen1 - buffer for data still inflight in a request when GC triggered, so when do gen1 GC data will not be referenced. Gen1 collects gen0 & gen1, Gen2 collects 0, 1, 2.
+
+Gen0, 1, 2 all have their own allocation budget. When budget is consumed (area full), do GC and move to next generation.
+
+> If an object is in genX, it means it can only possibly get reclaimed when a genX GC happens.
+
+**Larget Object Heap (LOH)** when object is too large: discourage users from allocating larget objects carelessly. Kept tracked as gen3, but logically gen2. Default threshold for object in LOH: >= 85000 bytes.
+
+Compacting vs Sweeping. Both are supported in .Net GC. Compacting is more expensive but can save more space. 
+
+Full GC is done concurrently to pause user threads only for a short amount of time. So it's *Background GC(BGC)*: build up a Gen2 free list to accomodate Gen1 survivors. When it's done, a fresh free list is built up.
+
+Perf problem: When do next BGC, still see a lot of free space in Gen2, then it's needless to build up the fresh free list.
+
+
+
+
+
+
+
