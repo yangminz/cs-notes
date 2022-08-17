@@ -1740,4 +1740,123 @@ FSM
 
 # Chapter 4 The Network Layer
 
+## 4.5 Routing Algorithms
+
+The network must determine the path that packets take from senders to receivers through the network of routers. Typically the host is attached directly to one router, **default router/first-hop router**. So a packet from a host is transferred to default router. 
+
+The routing algorithm: given a set of routers with links connecting the routers, a routing algorithm shuold find a good path (least cost) from source router to destination router. 
+
+-   **Global Routing Algorithms**: compute the least-cost path based on the complete, global knowledge about the network. Take the whole graph/topology as input. *Linke-state (LS) algorithms*
+-   **Decentralized Routing Algorithm**: the calculation is carried out in an iterative, distributed manner. Each node only knows the neighborhood.E.g., *Distance-Vector (DV) algorithm*.
+
+Another classification is if they are load-sensitive or load-insensitive.
+
+### 4.5.1 The Link-State (LS) Routing Algorithm
+
+The complete topology is known and taken as input. Each node boardcast link-state packets to all other nodes in the network, containing the identities & costs of links, accomplished by a **Link-State Broadcast Algorithm**.
+
+*Dijkstra's Algorithm* as link-state routing algorithm to compute the least-cost path from source node to all other nodes in the network. After $k$ iterations, will know least-cost path to $k$ destinations.
+
+```cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Routing
+{
+    public class Node
+    {
+        /// <summary>
+        /// The edges with this node and edge cost
+        /// </summary>
+        public Dictionary<Node, int> Edges = new Dictionary<Node, int>();
+
+        /// <summary>
+        /// The cost of the shortest path to destination
+        /// </summary>
+        public Dictionary<Node, int> DistTo = new Dictionary<Node, int>();
+
+        /// <summary>
+        /// The shortest path to destination
+        /// </summary>
+        public Dictionary<Node, List<Node>> PathTo = new Dictionary<Node, List<Node>>();
+
+        /// <summary>
+        /// The name
+        /// </summary>
+        public string Name;
+
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        /// <param name="name">The name of node</param>
+        public Node(string name)
+        {
+            this.Name = name;
+        }
+
+        /// <summary>
+        /// Calculate the shortest path from this node to every node in graph
+        /// </summary>
+        /// <param name="graph">The graph topology</param>
+        public void CalculateUnDirectedShortestPath(HashSet<Node> graph)
+        {
+            // Add the node itself to finished. Deep copy
+            HashSet<Node> notFinished = new HashSet<Node>(graph);
+            notFinished.Remove(this);
+            this.PathTo[this] = null;
+
+            // initialize path
+            foreach (Node v in notFinished)
+            {
+                this.PathTo[v] = new List<Node>() { v };
+            }
+
+            // infinite as unknown and neighbors are currently known
+            foreach (Node v in graph)
+            {
+                if (this.Edges.TryGetValue(v, out int cost))
+                {
+                    this.DistTo[v] = cost;
+                }
+                else
+                {
+                    this.DistTo[v] = Int32.MaxValue;
+                }
+            }
+            this.DistTo[this] = 0;
+
+            // calculate and converge
+            while (notFinished.Count > 0)
+            {
+                // not converged
+
+                // find the shortest path of unfinished node
+                Node w = (from t in notFinished
+                    select new KeyValuePair<Node, int>(t, this.DistTo[t]))
+                    .OrderBy(x => x.Value).First().Key;
+                notFinished.Remove(w);
+
+                foreach (Node v in w.Edges.Keys)
+                {
+                    if (this.DistTo[v] > this.DistTo[w] + w.Edges[v])
+                    {
+                        // update distance
+                        this.DistTo[v] = this.DistTo[w] + w.Edges[v];
+
+                        // update path
+                        this.PathTo[v] = new List<Node>(this.PathTo[w]);
+                        this.PathTo[v].Add(v);
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### 4.5.2 The Distance-Vector (DV) Routing Algorithm
+
+### 4.5.3 Hierarchial Routing
+
 # Chapter 8 Security in Computer Networks
