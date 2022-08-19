@@ -49,15 +49,35 @@ private void Relax(Vertex s, Vertex v, Vertex w, Graph graph)
 
 ***Optimality conditions***: There is an equivalence between between the *global* condition that the distances are shortest-paths distances, and the *local* condition that we test to relax an edge.
 
-For graph $G = (V, E)$, source vertex $s$ and distance-to table $D(s, \cdot)$. For table $D(s, v)$, 
+For graph $G = (V, E)$, source vertex $s$ and distance-to table $D(s, \cdot)$ (i.e., `DistTo[]`). For table $D(s, w)$, 
 
--   $D(s, v)$ is the possible total weight of *some* path $s \rightsquigarrow v$, if $v$ is reachable from $s$;
--   $D(s, v) = +\infty$, if $v$ is not reachable from $s$.
+-   $D(s, w)$ is the possible total weight of *some* path $s \rightsquigarrow w$, if $w$ is reachable from $s$;
+-   $D(s, w) = +\infty$, if $w$ is not reachable from $s$.
 
-$D(s, v)$ is the weights of shortest paths iff for any edge $(v, w)$, there is:
+$D(s, w)$ is the weights of shortest paths ($\delta(s, w) = \min\{D(s, w)}$) iff for any edge $(v, w)$, there is:
 
 $$D(s, w) \leq D(s, v) + W(v, w)$$
 
 i.e., no edge is eligible.
 
-**Proof**:
+**Proof:** 
+
+Necessary: If there is an edge $(v, w)$, s.t., 
+
+$$D(s, w) > D(s, v) + W(v, w)$$
+
+The path $s \rightsquigarrow v, w$ is shorter than the path of $D(s, w)$, so the path is not the shortest path.
+
+Sufficient: By *triangle inequality*, suppose the shortest path is: $s = u_0, u_1, u_2, \cdots, u_n = w$
+
+$$D(s, w) = D(u_0, u_n) \leq D(u_0, u_{n - 1}) + W(u_{n - 1}, u_n) \leq D(u_0, u_{n - 2}) + W(u_{n - 2}, u_{n - 1}) + W(u_{n - 1}, u_n) \leq \cdots$$
+
+Finally,
+
+$$D(s, w) \leq \sum_{i = 1}^n W(u_{i - 1}, u_i) = \delta(s, w)$$
+
+Since $D(s, w) = W(s \rightsquigarrow w)$, so it must be bigger than the shortest path:
+
+$$\delta(s, w) \leq D(s, w) \leq \delta(s, w)$$
+
+Then $D(s, w) = \delta(s, w)$.

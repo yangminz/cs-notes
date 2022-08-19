@@ -12,7 +12,7 @@ Let $G = (V, E)$ be a weighted, directed graph with weight function $w: E \right
 
 $$\delta(s, v) \leq \delta(s, u) + w(u, v)$$
 
-**Proof**: For any path from $s$ to $v$, it must go through one neighbor $u$ of $v$: $(s \rightsquigarrow u, v)$. Then the path weight can be divided into 2 parts:
+**Proof:** For any path from $s$ to $v$, it must go through one neighbor $u$ of $v$: $(s \rightsquigarrow u, v)$. Then the path weight can be divided into 2 parts:
 
 $$w(s \rightsquigarrow u, v) = w(s \rightsquigarrow u) + w(u, v)$$
 

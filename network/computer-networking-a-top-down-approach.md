@@ -1855,7 +1855,15 @@ namespace Routing
 }
 ```
 
+A pathology: Oscillations. When the edge cost is dynamic, e.g., the load carried on the link. Then the routing table is not stable and would change over time. **Congestion-sensitive routing**. Solution: Ensure not all routers run the LS algorithm at the same time. 
+
 ### 4.5.2 The Distance-Vector (DV) Routing Algorithm
+
+DV algorithm is iterative, aysnc, distributed. Let $d_x(y)$ be the cost of the least-cost path from node $x$ to node $y$. Then by the celebrated Bellman-Ford equation,
+
+$$d_x(y) = \min_v\{ c(x, v) + d_v(y) \}$$
+
+i.e., the triangle inequality. 
 
 ### 4.5.3 Hierarchial Routing
 
