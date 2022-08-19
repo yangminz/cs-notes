@@ -54,7 +54,7 @@ For graph $G = (V, E)$, source vertex $s$ and distance-to table $D(s, \cdot)$ (i
 -   $D(s, w)$ is the possible total weight of *some* path $s \rightsquigarrow w$, if $w$ is reachable from $s$;
 -   $D(s, w) = +\infty$, if $w$ is not reachable from $s$.
 
-$D(s, w)$ is the weights of shortest paths ($\delta(s, w) = \min\{D(s, w)}$) iff for any edge $(v, w)$, there is:
+$D(s, w)$ is the weights of shortest paths ($\delta(s, w) = \min\{D(s, w)\}$) iff for any edge $(v, w)$, there is:
 
 $$D(s, w) \leq D(s, v) + W(v, w)$$
 

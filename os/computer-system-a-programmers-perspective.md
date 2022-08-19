@@ -349,6 +349,123 @@ int execve(const char *filename, const char *argv[], const char *envp[]);
 
 When parsed `filename`, calls the start-up code to set up the stack and passes control to main routine of the new program. 
 
+## 8.5 Signals
+
+Higher-level software form of ECF: Linux signal, allowing processes and the kernel to interrupt other processes.
+
+| Number | Name        | Default action          | Corresponding event                       |
+|--------|-------------|-------------------------|-------------------------------------------|
+| 2      | `SIGINT`    | Terminate               | Interrupt from keyboard                   |
+| 3      | `SIGQUIT`   | Terminate               | Quit from keyboard                        |
+| 5      | `SIGTRAP`   | Terminate and dump core | Trace trap                                |
+| 6      | `SIGABRT`   | Terminate and dump core | Abort signal from abort function          |
+| 8      | `SIGFPE`    | Terminate and dump core | Floating-point exception                  |
+| 9      | `SIGKILL`   | Terminate               | Kill program                              |
+| 11     | `SIGSEGV`   | Terminate and dump core | Invalid memory reference (seg fault)      |
+| 17     | `SIGCHLD`   | Ignore                  | A child process has stopped or terminated |
+| 18     | `SIGCONT`   | Ignore                  | Continue process if stopped               |
+| 19     | `SIGSTOP`   | Stop until next SIGCONT | Stop signal not from terminal             |
+| 20     | `SIGTSTP`   | Stop until next SIGCONT | Stop signal from terminal                 |
+| 21     | `SIGTTIN`   | Stop until next SIGCONT | Background process read from terminal     |
+| 22     | `SIGTTOU`   | Stop until next SIGCONT | Background process wrote to terminal      |
+
+Each signal is some kind of system event. Expose the low level exceptions to user processes.
+
+### 8.5.1 Signal Terminology
+
+**Sending a signal**: kernel sends a signal to destination process by updating the context of destination. 2 reasons for delivery: (1) detect a system event; (2) another process invokes `kill` to ask the kernel to send signal. can be send to itself.
+
+**Receiving a signal**: destination process forced by kernel to react to the signal delivery: ignore, terminate, catch.
+
+A signal updated in destination but not reacted is called **pending**. There is *at most one* pending signal *of a particular type*. i.e., `SIGCHLD` can be only one. Subsequent of pending signals are discarded.
+
+Process can block the receipt of certain signals. The signal will be delivered but no action until destination unblock it.
+
+A pending signal is received at most once.
+
+### 8.5.2 Sending Signals
+
+One can send signals to process groups via:
+
+1.  use `/bin/kill` program
+2.  from keyboard
+3.  use `kill` system function (to themselves)
+4.  use `alarm` system function (`SIGALRM`)
+
+```c
+#include <sys/types.h>
+#include <signal.h>
+int kill(pid_t pid, int sig);
+```
+
+### 8.5.3 Receiving Signals
+
+When process `iret` from kernel to user, it check the unblocked pending signals. If there is unblocked pending signals, call default actions/user-defined handler.
+
+Signal handlers can be interrupted by other handlers.
+
+### 8.5.4 Blocking and Unblocking Signals
+
+-   *Implicit blocking mechanism*: By default, blocks any pending signals of the type currently being processed by a handler. E.g., when process `SIGCHLD`, another `SIGCHLD` delivered, it will be pending but not received until the handler returns.
+-   *Explicit blocking mechanism*: use `sigprocmask` and its helpers. It will change the set of currently blocked bit vector.
+
+```c
+#include <signal.h>
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+int sigemptyset(sigset_t *set);
+int sigfillset(sigset_t *set);
+int sigaddset(sigset_t *set, int signum);
+int sigdelset(sigset_t *set, int signum);
+int sigismember(const sigset_t *set, int signum);
+```
+
+### 8.5.6 Synchronizing Flows to Avoid Nasty Concurrency Bugs
+
+There might be race condition due to interleaving of parent's main routine and signal-handling when `fork` and signal handler for `SIGCHLD`. Can block `SIGCHLD` before `fork` and unblock it afterwards to eliminate race.
+
+### 8.5.7 Explicitly Waiting for Signals
+
+Spin loop:
+
+```c
+while (!pid)
+    /*  pause() may be interrupted by receiving one or more SIGINT. 
+        if SIGCHLD is received after `while` and before `pause`,
+        `pause` will sleep forever -- RACE CONDITION!!!
+     */
+    pause();
+
+while (!pid)
+    /*  No race but too slow
+        If signal received after `while` and before `sleep`,
+        the program must wait a long time before it can check the loop termination condition 
+     */
+    sleep(1);
+```
+
+Use `sigsuspend` instead:
+
+```c
+#include <signal.h>
+int sigsuspend(const sigset_t *mask);
+```
+
+It's a atomic/uninterruptible block and pause and unblock to eliminate race:
+
+```c
+sigprocmask(SIG_BLOCK, &mask, &prev);
+pause();
+sigprocmask(SIG_SETMASK, &prev, NULL);
+```
+
+`pause` will cause the caller to sleep until a signal is delivered that either terminates the process or causes the invocation of a signal-catching function.
+
+`sleep` will delay for a specific amount of time.
+
+`sigsuspend` will temporarily replaces the signal mask of the caller by argument. And then suspends the process until delivery of a signal whose action is to invoke a signal handler or termination. If terminates, no return. If signal is caught, `sigsuspend` returns after the handler returns and then restore the mask. CANNOT BLOCK `SIGKILL` or `SIGSTOP`.
+
+Normally, it is used together with `sigprocmask` to prevent delivery of a signal during execution of a critical code section. The caller first blocks the signal with `sigprocmask`. When critical code completed, caller then waits for the signal by `sigsuspend` with the signal mask returned by `sigprocmask`.
+
 # Chapter 9. Virtual Memory
 
 ## 9.7 Case Study: The Intel Core i7/Linux Memory System

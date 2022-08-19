@@ -79,7 +79,7 @@ TASK_STOPPED            execution has been stopped: SIGSTOP, SIGTSTP, SIGTIN, SI
 TASK_TRACED             stopped by debugger
 
 EXIT_ZOMBIE             terminated but parent has not yet issued a wait
-EXIT_DEAD               process is being removed by kernel because parent wait
+EXIT_DEAD               process is being removed by kernel because parent wait. To avoid race condition
 ```
 
 ### Identifying a Process
@@ -120,9 +120,9 @@ group the processes by their states: running --> runqueue. `TASK_STOPPED, EXIT_Z
 
 (Blocked)
 
-wait queues several uses. particularly for interrupt handling, process ysnc, timing. in general, a process must wait for some event to occur, e.g. disk read to terminate, 500ms to elapse, etc. Implement conditional waits on event. 
+wait queues several uses. particularly for interrupt handling, process sync, timing. in general, a process must wait for some event to occur, e.g. disk read to terminate, 500ms to elapse, etc. Implement conditional waits on event. 
 
-Multiple wait queues. Each wait queue should be protected from concurrent access. They are modified by interrupt handlers & kernel functions. 
+Multiple wait queues - doubly linked list. Each wait queue should be protected from concurrent access. They are modified by interrupt handlers & kernel functions. 
 
 Processes in wait queue are sleeping, waiting for some event to occur. When wake up, 2 situations: wake up one particular process, wake up all processes (**Thundering herd**). Choose this by flags. Each sleeping process is *exclusive* or *nonexclusive*.
 
@@ -590,3 +590,44 @@ If master kernel page table entry is null, goto `no_context` and hanldling this 
 
 # Chapter 10. System Calls
 
+# Chapter 11. Signals
+
+## 11.1 The Role of Signals
+
+Signal: a very short message may be sent to a process or a group of processes. Usually a number identifying the signal. Purposes:
+
+1.  Notify a process of a specific event happened
+2.  Cause a process to execute a signal handler in user code
+
+| System Call     | Description                         |
+|-----------------|-------------------------------------|
+| `kill`          | Send a signal to a thread group     |
+| `sigprocmask`   | Modify the set of blocked signals   |
+| `sigsuspend`    | Wait for a signal                   |
+
+## System Calls Related to Signal Handling
+
+### Suspending the Process
+
+`sigsuspend()` put process in `TASK_INTERRUPTIBLE` state. The process will wake up only when a nonignored, nonblocked signal is sent to it.
+
+```c
+mask &= ~(sigmask(SIGKILL) | sigmask(SIGSTOP));
+saveset = current->blocked;
+siginitset(&current->blocked, mask);
+recalc_sigpending(current);
+regs->eax = -EINTR;
+while (1) {
+    current->state = TASK_INTERRUPTIBLE;
+    schedule();
+    // process 2 run
+
+    // When process 1 (caller) executed again
+    // Start from here and deliver the signal that has awakened the process
+    // If return 1, signal not ignored (awaken incorrectly)
+    if (do_signal(regs, &saveset))
+        return -EINTR;
+}
+```
+
+`sigsuspend` does not equal to `sigprocmask() + sleep()`. Need to consider interrupt between the 2 syscalls.
