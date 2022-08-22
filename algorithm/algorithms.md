@@ -81,3 +81,17 @@ Since $D(s, w) = W(s \rightsquigarrow w)$, so it must be bigger than the shortes
 $$\delta(s, w) \leq D(s, w) \leq \delta(s, w)$$
 
 Then $D(s, w) = \delta(s, w)$.
+
+# Chapter 5 Strings
+
+## 5.2 Tries
+
+### Ternary search tries (TSTs)
+
+R-way Trie: may have excessive space cost. Alternative representation: *Ternary search trie (TST)*. Each node has 1 character, 1 value, 3 links:
+
+-   Keys whose characters are less than the node's character
+-   Keys whose characters are equal to the node's character
+-   Keys whose characters are greater than the node's character
+
+![](./svg/tst.svg)
