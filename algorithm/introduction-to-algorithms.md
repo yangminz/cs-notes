@@ -222,56 +222,42 @@ Now we have discussed all cases of adjusting double black nodes.
 
 In this case, we want to delete $(X, \otimes, Y)$. It's clear that subtree $Y$ must be $T_0$ and it's not null. Thus it must be $(Y^R, \otimes, \otimes)$. So $X$ must be black:
 
-$$(X^B, \otimes, (Y^R, \otimes, \otimes))$$
+$$(X^B, \otimes, (Y^R, \otimes, \otimes)_0)_1$$
 
 or
 
-$$(X^B, (Y^R, \otimes, \otimes), \otimes)$$
+$$(X^B, (Y^R, \otimes, \otimes)_0, \otimes)_1$$
 
 Consider the parent:
 
-$$(G^{R/B}, (X^B, \otimes, (Y^R, \otimes, \otimes)), T_1)$$
+$$(G, (X^B, \otimes, (Y^R, \otimes, \otimes)_0)_1, T_1)$$
 
 When delete $X^B$, just replace it by $Y^R$ and recolor $Y^R$ to black to keep the black balanced:
 
-$$\Longrightarrow (G^{R/B}, (Y^B, \otimes, \otimes), T_1)$$
+$$\Longrightarrow (G, (Y^B, \otimes, \otimes)_1, T_1)$$
 
 #### Case 3: Delete a node without null child
 
 When both left and right subtrees are not null, we use the **successor** of $X$ to replace it. Suppose its color is $A$, black or red: $X^A$. There are 2 situations of `X.Right.Left`, null or non-null:
 
-1.  $(X^A, \alpha, (Y, \otimes, \beta))$
-2.  $(X^A, \alpha, (Y, \beta, \gamma))$
+1.  $(X^A, \alpha, (Y, \otimes, \beta_0))$
+2.  $(X^A, \alpha, (Y_1, \beta, \gamma))$
 
-*3.1*: when `X.Right.Left` is null. In this case, the successor node is $Y$. We immediately have $\beta$ is $T_0$:
+*3.1*: when `X.Right.Left` is null. In this case, the successor node is $Y$. Suppose the color of $Y$ is $C$:
 
-$$(X^A, \alpha, (Y, \otimes, T_0))$$
+$$(X^A, \alpha, (Y^C, \otimes, \beta_0))$$
 
-*3.1.A*: If $Y$ is red, then:
+Swap $X^A$ with $Y^C$ without color:
 
-$$(X^A, \alpha, (Y, \otimes, T_0)) = (X^B, T_0, (Y^R, \otimes, \otimes))$$
+$$\Longrightarrow (Y^A, \alpha, (X^C, \otimes, \beta_0))$$
 
-Then we can directly use $Y^R$ to replace $X^B$:
-
-$$(X^B, T_0, (Y^R, \otimes, \otimes)) \Longrightarrow (Y^B, T_0, \otimes)$$
-
-*3.1.B*: If $Y$ is black, then:
-
-$$(X^A, \alpha, (Y, \otimes, T_0)) = (X^A, T_1, (Y^B, \otimes, T_0))$$
-
-In this case, we firstly swap $X^A$ and $Y^B$ and leave the color at original position. This will break the property of BST, but we immediately remove the swapped $X^B$ so it will be safe:
-
-$$(X^{A}, T_1, (Y^B, \otimes, T_0)) \Longrightarrow (Y^{A}, T_1, (X^B, \otimes, T_0))$$
-
-Removing $X^B$ is removing a black node with only one subtree, which is discussed in case 2.
+This will break the property of BST ($Y > X$), but we will immediately delete $X^C$. This is discussed in case 2 as deleting one node with one null link.
 
 *3.2*: when `X.Right.Left` is not null. In this case, the successor node is the left most node of right subtree:
 
 $$(X^A, \alpha, R_1)$$
 
-The right subtree: $R_i = (Y_i, R_{i+1}, \beta_n)$ and the left-most node/subtree $R_n = (Y_n, \otimes, \beta_n)$. The successor node of $X^A$ is $Y_n^C$ (suppose the color of $Y_n$ is C).
-
-Then we swap $Y_n^C$ with $X^A$, i.e.:
+The right subtree: $R_i = (Y_i, R_{i+1}, \beta_n)$ and the left-most node/subtree $R_n = (Y_n, \otimes, \beta_n)$. The successor node of $X^A$ is $Y_n^C$(suppose the color of $Y_n$ is C). Then we swap $Y_n^C$ and $X^A$ without color, i.e.:
 
 $$(X^A, \alpha, R_1) \Longrightarrow (Y_n^A, \alpha, R_1)$$
 
@@ -279,9 +265,9 @@ $$R_n = (X^C, \otimes, \beta_n)$$
 
 At the same time, we need to adjust the left most nodes of right subtree:
 
-$$R_{n-1} = (Y_{n-1}, (X^C, \otimes, \beta_n=T_0), \beta_{n-1})$$
+$$R_{n-1} = (Y_{n-1}, (X^C, \otimes, \beta_n), \beta_{n-1})$$
 
-Same, this is discussed in case 2 as removing one node with only one subtree $(X^C, \otimes, T_0)$.
+Same, this is discussed in case 2 as removing one node with only one subtree $(X^C, \otimes, \beta_n)$.
 
 # VI Graph Algorithms
 
