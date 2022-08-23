@@ -94,4 +94,4 @@ R-way Trie: may have excessive space cost. Alternative representation: *Ternary 
 -   Keys whose characters are equal to the node's character
 -   Keys whose characters are greater than the node's character
 
-![](./svg/tst.svg)
+$$T_b = (b; T_{a | a < b}, T_{x | x = c}, T_{c |c > b})$$
