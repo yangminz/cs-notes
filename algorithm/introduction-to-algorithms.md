@@ -269,6 +269,250 @@ $$R_{n-1} = (Y_{n-1}, (X^C, \otimes, \beta_n), \beta_{n-1})$$
 
 Same, this is discussed in case 2 as removing one node with only one subtree $(X^C, \otimes, \beta_n)$.
 
+```cs
+namespace RedBlackTree
+{
+    public enum RedBlackColor
+    {
+        Red,
+        Black,
+    }
+
+    public interface IRedBlackNode<TKey, TValue>
+        where TKey : IComparable<TKey>
+    {
+        public IRedBlackNode<TKey, TValue> Parent { get; set; }
+        public IRedBlackNode<TKey, TValue> Left { get; set; }
+        public IRedBlackNode<TKey, TValue> Right { get; set; }
+        public RedBlackColor Color { get; set; }
+        public TKey Key { get; set; }
+        public TValue Value { get; set; }
+    }
+
+    public class RedBlackTree<TKey, TValue>
+        where TKey : IComparable<TKey>
+    {
+        public IRedBlackNode<TKey, TValue> Root;
+        public int BlackHeight { get; private set; } = 0;
+
+        internal void RotateMarco(
+            IRedBlackNode<TKey, TValue> p,
+            IRedBlackNode<TKey, TValue> n,
+            Func<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> getLeft,
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> setLeft,
+            Func<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> getRight,
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> setRight)
+        {
+            if (n == null || p == null ||
+                getLeft == null || getRight == null ||
+                setLeft == null || setRight == null ||
+                n.Parent != p || getLeft(p) != n)
+            {
+                throw new Exception();
+            }
+
+            IRedBlackNode<TKey, TValue> g = p.Parent;
+            if (g == null)
+            {
+                if (!(this.Root == p))
+                {
+                    throw new Exception();
+                }
+                else
+                {
+                    this.Root = n;
+                    n.Parent = null;
+                }
+            }
+            else
+            {
+                if (g.Left == p)
+                {
+                    g.Left = n;
+                    n.Parent = g;
+                }
+                else if (g.Right == p)
+                {
+                    g.Right = n;
+                    n.Parent = g;
+                }
+                else
+                {
+                    throw new Exception();
+                }
+            }
+
+            setLeft(p, getRight(n));
+            if (getLeft(p) != null)
+            {
+                getLeft(p).Parent = p;
+            }
+
+            setRight(n, p);
+            p.Parent = n;
+        }
+
+        internal void InsertionFixUp(IRedBlackNode<TKey, TValue> node)
+        {
+            if (node == null || node.Color == RedBlackColor.Black)
+            {
+                throw new Exception();
+            }
+
+            if (node.Parent == null)
+            {
+                if (this.Root == node)
+                {
+                    node.Color = RedBlackColor.Black;
+                    this.BlackHeight += 1;
+                    return;
+                }
+                else
+                {
+                    throw new Exception();
+                }
+            }
+
+            if (node.Parent.Color == RedBlackColor.Black)
+            {
+                // no need to fix
+                return;
+            }
+
+            // the parent color is red and this node is red
+            if (node.Parent.Parent == null || node.Parent.Parent.Color == RedBlackColor.Red)
+            {
+                throw new Exception();
+            }
+
+            // check uncle
+            IRedBlackNode<TKey, TValue> uncle = (node.Parent == node.Parent.Parent.Left) ?
+                uncle = node.Parent.Parent.Right :
+                uncle = node.Parent.Parent.Left;
+
+            IRedBlackNode<TKey, TValue> subroot = (uncle?.Color == RedBlackColor.Red) ?
+                // no rotate
+                subroot = node.Parent.Parent :
+                // rotate
+                subroot = this.Rotate(node.Parent.Parent, node.Parent, node);
+
+            // recolor
+            subroot.Color = RedBlackColor.Red;
+            subroot.Left.Color = RedBlackColor.Black;
+            subroot.Right.Color = RedBlackColor.Black;
+
+            // recursively fix up
+            this.InsertionFixUp(subroot);
+        }
+
+        public void Insert(IRedBlackNode<TKey, TValue> node)
+        {
+            if (node == null || node.Left != null || node.Right != null)
+            {
+                throw new AggregateException();
+            }
+
+            if (this.Root == null)
+            {
+                this.Root = node;
+                this.Root.Color = RedBlackColor.Black;
+                this.BlackHeight = 1;
+                return;
+            }
+
+            node.Color = RedBlackColor.Red;
+
+            IRedBlackNode<TKey, TValue> p = this.Root;
+            while (p != null)
+            {
+                if (p.Key.CompareTo(node.Key) <= 0)
+                {
+                    if (p.Right == null)
+                    {
+                        p.Right = node;
+                        node.Parent = p;
+                        break;
+                    }
+                    p = p.Right;
+                }
+                else
+                {
+                    if (p.Left == null)
+                    {
+                        p.Left = node;
+                        node.Parent = p;
+                        break;
+                    }
+                    p = p.Left;
+                }
+            }
+            // return here for BST
+
+            // Fix up
+            this.InsertionFixUp(node);
+        }
+
+        public void Delete(IRedBlackNode<TKey, TValue> node)
+        {
+            if (node == null)
+            {
+                throw new AggregateException();
+            }
+        }
+
+        public IRedBlackNode<TKey, TValue> Rotate(IRedBlackNode<TKey, TValue> g, IRedBlackNode<TKey, TValue> p, IRedBlackNode<TKey, TValue> n)
+        {
+            if (g == null || p == null || n == null ||
+                n.Parent != p || p.Parent != g)
+            {
+                throw new Exception();
+            }
+
+            Func<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> getLeft = x => x.Left;
+            Func<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> getRight = x => x.Right;
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> setLeft = (x, y) => { x.Left = y; };
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> setRight = (x, y) => { x.Right = y; };
+
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> rotateRight = (x, y) => { 
+                this.RotateMarco(x, y, getLeft, setLeft, getRight, setRight); 
+            };
+            Action<IRedBlackNode<TKey, TValue>, IRedBlackNode<TKey, TValue>> rotateLeft = (x, y) => {
+                this.RotateMarco(x, y, getRight, setRight, getLeft, setLeft);
+            };
+
+            if (g.Left == p)
+            {
+                if (p.Left == n)
+                {
+                    rotateRight(g, p);
+                    return p;
+                }
+                else if (p.Right == n)
+                {
+                    rotateLeft(p, n);
+                    rotateRight(g, n);
+                    return n;
+                }
+            }
+            else if (g.Right == p)
+            {
+                if (p.Left == n)
+                {
+                    rotateRight(p, n);
+                    rotateLeft(g, n);
+                    return n;
+                }
+                else if (p.Right == n)
+                {
+                    rotateLeft(g, p);
+                    return p;
+                }
+            }
+            throw new Exception();
+        }
+    }
+}
+```
 # VI Graph Algorithms
 
 ## 24 Single-Source Shortest Paths
