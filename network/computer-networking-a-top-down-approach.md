@@ -1863,7 +1863,96 @@ DV algorithm is iterative, aysnc, distributed. Let $d_x(y)$ be the cost of the l
 
 $$d_x(y) = \min_v\{ c(x, v) + d_v(y) \}$$
 
-i.e., the triangle inequality. 
+i.e., the triangle inequality. Provides the entries in routing table: One router need to know the neighboring node that is the next-hop router along the shortest path.
+
+**Distributed & Async & Decentralized** algorithm that do not maintain any global information. Each node waits for an update from any neighbor and calculates its new distance vector. Used in Internet's RIP (Routing Information Protocol), BGP, ISO, IDRP, etc.
+
+Define the distance vector $D_x(y)$, distance to $y$ is calculated through $x$'s neighbor $v$:
+
+$$D_x(y) = \min_v \{c(x, v) + D_v(y)\}$$
+
+For example, the topology graph:
+
+```
+A -- B = 1
+A -- C = 1
+B -- C = 3
+B -- D = 3
+C -- D = 2
+```
+
+Then the route table of A will computes the shortest distance to every destination (B, C, D) via any of its neighbors (B and C):
+
+|            | to B | to C | to D |
+|------------|------|------|------|
+| via Port B | 1 ms | 4 ms | 4 ms |
+| via Port C | 4 ms | 1 ms | 3 ms |
+
+Then the min-distance vector of A would be
+
+-   $D_A(A) = 0$
+-   $D_A(B) = \min\{c(A, B) + D_B(B), c(A, C) + D_C(B)\} = \min\{ 1 + 0, 1 + 3\} = 1$
+-   $D_A(C) = \min\{c(A, B) + D_B(C), c(A, C) + D_C(C)\} = \min\{ 1 + 3, 1 + 0\} = 1$
+-   $D_A(D) = \min\{c(A, B) + D_B(D), c(A, C) + D_C(D)\} = \min\{ 1 + 3, 1 + 2\} = 3$
+
+| to A | to B | to C | to D |
+|------|------|------|------|
+| 0 ms | 1 ms | 1 ms | 3 ms |
+
+After recompute distance vectors, send the updated vectors to neighbors by best efforts.
+
+Routers use neighbors’ distance vectors to learn route table, especially when start from a almost empty table. That’s to say, router chooses to go to destination via one hop on its neighbor or from the current port directly. Routers exchange their distance vectors with neighbors and update their own routing tables and distance vectors. This process will continue until convergence.
+
+In $k^{th}$ round, the routers would get best $(k+1)$-hop paths. The algorithm will converge eventually.
+
+#### Distance-Vector Algorithm: Link-Cost Changes and Link Failure
+
+When link cost change to neighbor, update DV and inform the neighbor of the new DV. But may trap into a **quiescent state** if least costs do not change even when receive new DV. Example, the topology:
+
+```
+X -- Y = 4
+X -- Z = 50
+Y -- Z = 1
+```
+
+The current DVs:
+
+|    | Y | Z |   |    | X | Z |   |    | X | Y |
+|----|---|---|---|----|---|---|---|----|---|---|
+| X: | 4 | 5 |   | Y: | 4 | 1 |   | Z: | 5 | 1 |
+
+When link $c(X, Y) = 4 \rightarrow 1$, 
+
+1.  X firstly updates DV $(D_X(Y) = 1, D_X(Z) = 2)$ and boardcast it to Y & Z.
+2.  Z receives the update from Y and updates its table: $(D_Z(X) = 2, D_Z(Y) = 1)$ and boardcast it to X & Y.
+3.  Y receives the update from Z. $D_Y(Z)$ still be 1, not changed, so no update to Z.
+
+When link $c(X, Y) = 4 \rightarrow 60$, Y computes $D_Y(X) = \min\{60 + 0, 1 + 5\} = 6$. But there is no such path! The old $D_X(Z) = 5$ is based on $c(X, Y) = 4$ and it increased to 60 now. **Routing Loop/Count to Infinity Routing** problem. : $Y \rightarrow Z \rightarrow Y$. Then for $D_Y(X)$:
+
+$$D_Y(X) = 1 + 5 = 6 \rightarrow 1 + 6 = 7, \cdots, 1 + 49 = 50$$
+
+Message would travel between Y and Z until $D_Y(X) \geq c(X, Z) = 50$. The root of the problem is that DV algorithm has no way to detect and prevent loops.
+
+#### Distance-Vector Algorithm: Adding Poisoned Reverse
+
+Three techniques to mitigate:
+
+-   *Split Horizon/Poison Reverse*: $Z$ routes to $X$ through $Y$, then poison the path by telling $Y$: $D_Z(X) = \infty$. But actually it still does not detect loop with nodes >= 3.
+-   *Maximum Path Lengths*: Set path length limit to stop from counting forever.
+-   *Pushdown Timers*
+
+#### A Comparison of LS and DV Routing Algorithms
+
+DV: talks much with neighbors only. LS: boardcast little to each nodes.
+
+-   **Message complexity**: LS/Dijkstra $O(VE)$ in total. DV $O(V)$ in total.
+-   **Speed of convergence**: LS $O(V^2)$. DV can be slow and may have routing loops. DV also suffers from count-to-infinity problem.
+-   **Robustness**: LS, routing calculations are separated. DV, coupled, incorrect calculation will corrupt other nodes.
+
+#### Other Routing Algorithms
+
+-   Based on packet traffic
+-   Circuit-switched routing algorithms
 
 ### 4.5.3 Hierarchial Routing
 
