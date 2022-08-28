@@ -1740,6 +1740,40 @@ FSM
 
 # Chapter 4 The Network Layer
 
+## 4.4 The Internet Protocol (IP): Forwarding and Addressing in the Internet
+
+Internet addressing: IPv4 & IPv6. Forwarding: routing algorithms.
+
+### 4.4.1 Datagram Format
+
+```
+ 4Bits   4Bits   8Bits           16Bits
++---------------------------------------------------------------+
+|Version|Header |Type of Service|     Datagram Length (Bytes)   |
+|       |Length |               |                               |
+|---------------------------------------------------------------|
+|       16-Bit Identifier       |Flags|   13-Bit Fragmentation  |
+|                               |     |   Offset                |
+|---------------------------------------------------------------|
+| Time-to-Live  |  Upper-Layer  |        Header Checksum        |
+|               |  Protocol     |                               |
+|---------------------------------------------------------------|
+|                     32-Bit Source IP Address                  |
+|---------------------------------------------------------------|
+|                  32-Bit Destination IP Address                |
+|---------------------------------------------------------------|
+|                        Options (if any)                       |
+|---------------------------------------------------------------|
+|                              Data                             |
++---------------------------------------------------------------+
+```
+
+Most IP datagrams do not contain options, so the header length is `(4+4+8+16+16+3+13+8+8+16+32+32)Bits = 5*32Bits = 20Bytes`.
+
+Max datagram length = $2^16$ Bits = 65536 Bits. Most datagrams are less than 1500 Bytes.
+
+
+
 ## 4.5 Routing Algorithms
 
 The network must determine the path that packets take from senders to receivers through the network of routers. Typically the host is attached directly to one router, **default router/first-hop router**. So a packet from a host is transferred to default router. 
@@ -1955,5 +1989,32 @@ DV: talks much with neighbors only. LS: boardcast little to each nodes.
 -   Circuit-switched routing algorithms
 
 ### 4.5.3 Hierarchial Routing
+
+LS/DV: for homogeneous routers. Not good for:
+
+-   **Scale**. E.g., when too many routers, Dijkstra would consume much memory resource. The broadcast would take up all bandwidth and no actual data packet would be sent. *Need to reduce the complexity of route computation in networks*.
+-   **Administrative autonomy**. Orgnization & policies.
+
+So organizing routers into **autonomous systems(AS)**, each AS = a group of routers under same administrative control, run the same routing algorithms. Routing between ASs = **Intra-autonomous system routing protocl**. Named as **Gateway Routers**.
+
+// ATM/ACDC in Microsoft Exchange Networking. Client Access Front End machines.
+
+Inside AS routing: LS/DV. Problem: how to route a packet destinated outside the AS.
+
+-   One gateway. Use LS/DV to find least cost path to the gateway. Gateway forwards the packet on the outbound link.
+-   Multiple gateways (multiple outbound links). AS needs to: (1) learn the outgoing port for data from neighboring ASs; (2) propagate the reachability to routers within AS. 
+
+Handled by **inter-AS routing protocol**. The communicating ASs should run the same protocol. Infact, all ASs run the same protocol: **BGP4**. 
+
+// The BGP incident: route the load to Marseille to Zurich.
+
+**Hot-potato Routing**: AS gets rid of the packet (the hot potato) as inexpensively as possible. Host will use info from the BGP routing to determine the least cost to gateway and use it. Add an entry of *the destination* and *gateway interface* to routing table.
+
+AS1 learns from AS2 that subnet x is reachable from AS2, AS1 will tell AS3.
+
+ISPs may partition the network into multiple ASs.
+
+## 4.6 Routing in the Internet
+
 
 # Chapter 8 Security in Computer Networks

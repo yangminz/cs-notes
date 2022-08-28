@@ -1,5 +1,40 @@
 3rd Edition By Randal E. Bryant and David R. O'Hallaron
 
+# Chapter 3. Machine-Level Representation of Program
+
+## 3.8 Array Allocation and Access
+
+```c
+int A1[2][5];
+
+int *A2[5][5];
+int *(A3[2][5]);
+/*
++---+---+---+---+---+
+| * | * | * | * | * |
++---+---+---+---+---+
+| * | * | * | * | * |
++---+---+---+---+---+
+*/
+
+int (*A4)[3][5]
+/*
+A4 ->
++---+---+---+---+---+
+|   |   |   |   |   |
++---+---+---+---+---+
+|   |   |   |   |   |
++---+---+---+---+---+
+*/
+
+int (*A5[2])[5];
+/*
++---+---+  +---+---+---+---+---+  +---+---+---+---+---+
+| * | * |  |   |   |   |   |   |  |   |   |   |   |   |
++---+---+  +---+---+---+---+---+  +---+---+---+---+---+
+*/
+```
+
 # Chapter 7. Linking
 
 ## 7.9 Loading Executable Object Files
@@ -417,6 +452,22 @@ int sigfillset(sigset_t *set);
 int sigaddset(sigset_t *set, int signum);
 int sigdelset(sigset_t *set, int signum);
 int sigismember(const sigset_t *set, int signum);
+```
+
+Temporarily blocking a signal from being received:
+
+```c
+sigset_t mask, prev_mask;
+sigemptyset(&mask);
+sigaddset(&mask, SIGINT);
+
+/* Block SIGINT and save previous blocked set */
+sigprocmask(SIG_BLOCK, &mask, &prev_mask);
+
+// Code region that will not be interrupted by SIGINT
+
+/* Restore previous blocked set, unblocking SIGINT */
+sigprocmask(SIG_SETMASK, &prev_mask, NULL);
 ```
 
 ### 8.5.6 Synchronizing Flows to Avoid Nasty Concurrency Bugs

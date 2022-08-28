@@ -605,7 +605,111 @@ Signal: a very short message may be sent to a process or a group of processes. U
 | `sigprocmask`   | Modify the set of blocked signals   |
 | `sigsuspend`    | Wait for a signal                   |
 
-## System Calls Related to Signal Handling
+Signal can be sent at any time to a process in any state. If not currently executing, kernel saves the signal until execution resumed. Blocking a signal -- hold off the delivery until it's unblocked. 2 phases:
+
+1.  Signal generation: kernel updates the data structure of the destination process;
+2.  Signal delivery: kernel force the destination process to react to the signal by changing its execution state, a specified signal handler.
+
+Each signal generated can be delivered at most once. Generated but not delivered are called pending signals. At any time, at most one pending signal of a type exists for a process. 
+
+### 11.1.1 Actions Performed upon Delivering a Signal
+
+1.  Explicitly ignore the signal;
+2.  Execute the default actions including: Terminate, Dump, Ignore, Stop, Continue;
+3.  Catch the signal by signal-handler function.
+
+Blocking $\neq$ Ignoring: Signal blocked ==> not delivered. It's delivered only after unblocked. Ignore ==> delivered but no action.
+
+`SIGKILL, SIGSTOP` can not be ignored, caught, blocked and must execute the default actions.
+
+### 11.1.3 Data Structures Associated with Signals
+
+Each process needs to keep track of the pending or masked signals.
+
+```c
+struct task_struct
+{
+    // storing the private pending signals
+    struct sigpending pending;    
+    /*  the signal descriptor of the process
+        signal counts, shared_pending list
+    */
+    struct signal_struct *signal;
+    // the signal handler of the process
+    struct sighand_struct *sighand;
+    /* mask of blocked signals
+        typedef struct {
+            unsigned long sig[2]; // 64 bits - at most 64 signals
+        } sigset_t;
+        1-31 signals
+        32-64 real-time signals
+    */
+    sigset_t blocked;
+}
+```
+
+#### 11.1.3.3 The pending signal queues
+
+Signal can be send to a whole thread group. So keep track of shared pending signals:
+
+1.  The shared pending signal queue: the pending signals for the whole thread group;
+2.  The private pending signal queue: for the process itself only.
+
+```c
+struct sigpending
+{
+    // doubly linked list head containing `sigqueue`
+    struct      list_head list;
+    // bit mask specifying the pending signals
+    sigset_t    signal;
+}
+```
+
+## 11.3. Delivering a Signal
+
+Kernel notices the arrival of a signal and then prepare the PCB to receive the signal. But when the process is not running on CPU, kernel defer the task of delivering the signal.
+
+Kernel firstly handles exception/interrupt, and then checks the value of `TIF_SIGPENDING` flag of process before resume user mode execution. If there is pending signals, handle it by invoking `do_signal`. One parameter is the user stack address saving the register contents.
+
+`do_signal` has a loop to repeatedly invoke `dequeue_signal` until no nonblocked pending signals (handle then one by one). `dequeue_signal` handles private signals first, from low signal number to high.
+
+`do_signal` will check if current receiver process is being monitored by others. If so, notify the parent of child stop and schedule to parent to aware of the signal handling.
+
+Three kinds of actions:
+
+1.  Ignoring the signal. `do_signal` simply continues.
+2.  Executing a default action;
+3.  Executing a signal handler;
+
+### 11.3.1. Executing the Default Action for the Signal
+
+`init` process (`pid==1`) will discard the signals received. For other ordinary processes, `do_signal` do the default action when `SIG_DFL`. 
+
+If default action is *ignore*, just continue to next signal handling.
+
+If default action is *stop*, set all processes in the thread group states to `TASK_STOPPED` and then `schedule()` to active processes. Also send `SIGCHLD` to parent process of the group leader.
+
+If default action is *dump*, create a `core` file in process working directory. 
+
+### 11.3.2. Catching the Signal
+
+If there is a handler, then `do_signal` must execute the handler. After handling one signal, other pending signals *won't be considered* until next invocation of `do_signal`.
+
+When handling, kernel need to take care of stacks carefully between user mode & kernel mode.
+
+Signal handlers are defined by user mode and in user mode code segment. `handle_signal()` runs in kernel mode, handlers run in user mode. But after handing signals and return to kernel, the interrupt context are emptied (interrupt).
+
+And handlers may invoke system call. 
+
+Linux will copy the hardware context from kernel stack to user stack and then execute signal handler. When handler returns, copy the hardware context back from user stack to kernel stack. And restore the user context in user stack.
+
+
+
+
+
+
+
+## 11.4 System Calls Related to Signal Handling
 
 ### Suspending the Process
 
