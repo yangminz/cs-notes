@@ -567,3 +567,289 @@ loading:
 3.  Map shared areas. e.g. GLIBC
 4.  Set program counter.
 
+# Chapter 10. System-Level I/O
+
+I/O is integral to OS, e.g., process creation & execution. 
+
+## 10.1 Unix I/O
+
+File is a sequence of bytes:
+
+$$B_0, B_1, \cdots, B_{m - 1}$$
+
+**All I/O devices (networks, disks, terminals) are modeled as files**. Input --> write. Output --> read. So kernel exports a simple, low-level application interface: Unix I/O.
+
+-   Open files
+-   Change file position
+-   Read/Write files
+-   Close files
+
+## 10.2 Files
+
+Each file has a type:
+
+1.  Regular File
+    -   text files (`\n == 0xa`)
+    -   binary files: everything other than text files.
+2.  Directory: array of links, each link is a file name to file/directory. at least 2 links: `.` links to itself; `..` links to parent.
+3.  Socket: communicate with other process across network.
+4.  Named pipes
+5.  Symbolic links
+6.  Character & Block Device
+
+directory hierarchy, root directory, current working directory (`cd`) of current process, absolute/relative pathname.
+
+## 10.3 Opening and Closing Files
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+int open(char *filename, int flags, mode_t mode);
+```
+
+convert filename to file descriptor and returns file descriptor number. 
+
+| `flag`     | Description                                |
+|------------|--------------------------------------------|
+| `O_RDONLY` | Read only                                  |
+| `O_WRONLY` | Write only                                 |
+| `O_RDWR`   | Read/Write                                 |
+| `O_CREAT`  | create a truncated/empty file if not exist |
+| `O_TRUNC`  | truncate file if exists                    |
+| `O_APPEND` | set file position to end of file           |
+
+`mode` specifies the access permission bits of new files:
+
+| Mask    | Description                                        |
+|---------|----------------------------------------------------|
+| S_IRUSR | User (owner) can read this file                    |
+| S_IWUSR | User (owner) can write this file                   |
+| S_IXUSR | User (owner) can execute this file                 |
+| S_IRGRP | Members of the owner’s group can read this file    |
+| S_IWGRP | Members of the owner’s group can write this file   |
+| S_IXGRP | Members of the owner’s group can execute this file |
+| S_IROTH | Others (anyone) can read this file                 |
+| S_IWOTH | Others (anyone) can write this file                |
+| S_IXOTH | Others (anyone) can execute this file              |
+
+Close file:
+
+```c
+#include <unistd.h>
+int close(int fd);
+```
+
+## 10.4 Reading and Writing Files
+
+```c
+#include <unistd.h>
+ssize_t read(int fd, void *buf, size_t n);
+ssize_t write(int fd, const void *buf, size_t n);
+```
+
+R/W *at most* `n` bytes from *current position* of file descriptor.
+
+May short counts if return < `n` when:
+
+-   Encountering EOF on reads: `n=50, filesize=10`.
+-   Reading text lines from a terminal: keyboard & display, `read` will transfer one text line at a time
+-   Reading and writing network sockets: network internal buffering constraints.
+
+## 10.5 Robust Reading and Writing with the Rio Package
+
+1.  Interrupt should not prevent read/write
+2.  Should be able to leave and return freely. Thread-safe.
+3.  Mixed data: text + binary in http response
+
+Unbuffered:
+
+```c
+while (nleft > 0)
+{
+    if (nread = read(fd, bufp, nleft) < 0)
+    {
+        // failed to read
+        if (errno = EINTR)
+        {
+            // interrupted by signal handler return
+            // retry read again
+            nread = 0;
+        }
+        else
+        {
+            // error number is set by read()
+            // instead of interrupt
+            // fail the read
+            return -1;
+        }
+    }
+    else if (nread == 0)
+    {
+        // EOF
+        break;
+    }
+    nleft -= nread;
+    bufp += nread;
+}
+```
+
+RIO data structure:
+
+```c
+#define RIO_BUFSIZE 8192
+typedef struct {
+    int rio_fd;                 /* Descriptor for this internal buf */
+    int rio_cnt;                /* Unread bytes in internal buf */
+    char *rio_bufptr;           /* Next unread byte in internal buf */
+    char rio_buf[RIO_BUFSIZE];  /* Internal buffer */
+} rio_t;
+```
+
+still, retry if interrupted by signal.
+
+## 10.6 Reading File Metadata
+
+```c
+#include <unistd.h>
+#include <sys/stat.h>
+int stat(const char *filename, struct stat *buf);
+int fstat(int fd, struct stat *buf);
+```
+
+data structure:
+
+```c
+/* Metadata returned by the stat and fstat functions */
+struct stat {
+    dev_t           st_dev;     /* Device */
+    ino_t           st_ino;     /* inode */
+    mode_t          st_mode;    /* Protection and file type */
+    nlink_t         st_nlink;   /* Number of hard links */
+    uid_t           st_uid;     /* User ID of owner */
+    gid_t           st_gid;     /* Group ID of owner */
+    dev_t           st_rdev;    /* Device type (if inode device) */
+    off_t           st_size;    /* Total size, in bytes */
+    unsigned long   st_blksize; /* Block size for filesystem I/O */
+    unsigned long   st_blocks;  /* Number of blocks allocated */
+    time_t          st_atime;   /* Time of last access */
+    time_t          st_mtime;   /* Time of last modification */
+    time_t          st_ctime;   /* Time of last change */
+};
+```
+
+## 10.7 Reading Directory Contents
+
+```c
+#include <sys/types.h>
+#include <dirent.h>
+DIR *opendir(const char *name);
+```
+
+## 10.8 Sharing Files
+
+-   Descriptor Table: Per process owned, points to file table
+-   File Table: Shared by processes, reference count, pointing to v-node
+-   v-node Table: Shared by processes, info like `stat`
+
+```
+Descriptor        Open file            v-node
+Table             Table                Table
++---------+       +-------------+       +-------------+
+| fd 0    |------>| File A      |------>| File Access |
++---------+       | File pos    |       | File Size   |
+| fd 1    |       | refcnt=1    |       | File Type   |
++---------+       +-------------+       +-------------+
+| fd 2    |
++---------+       +-------------+       +-------------+
+| fd 3    |------>| File B      |------>| File Access |
++---------+       | File pos    |       | File Size   |
+                  | refcnt=1    |       | File Type   |
+                  +-------------+       +-------------+
+```
+
+If `open` on the same file twice:
+
+```
+Descriptor        Open file            v-node
+Table             Table                Table
++---------+       +-------------+       +-------------+
+| fd 0    |------>| File A      |---+-->| File Access |
++---------+       | File pos    |   |   | File Size   |
+| fd 1    |       | refcnt=1    |   |   | File Type   |
++---------+       +-------------+   |   +-------------+
+| fd 2    |                         |
++---------+       +-------------+   |
+| fd 3    |------>| File B      |---+
++---------+       | File pos    |   
+                  | refcnt=1    |   
+                  +-------------+   
+```
+
+`fork` will let child & parent share files:
+
+```
+Descriptor        Open file            v-node
+Table             Table                Table
++---------+       +-------------+       +-------------+
+| fd 0    |-+---->| File A      |------>| File Access |
++---------+ |     | File pos    |       | File Size   |
+| fd 1    | |     | refcnt=2    |       | File Type   |
++---------+ |     +-------------+       +-------------+
+| fd 2    | |  
++---------+ |     +-------------+       +-------------+
+| fd 3    |----+->| File B      |------>| File Access |
++---------+ |  |  | File pos    |       | File Size   |
+            |  |  | refcnt=2    |       | File Type   |
+            |  |  +-------------+       +-------------+
+            |  |
++---------+ |  |
+| fd 0    |-+  |
++---------+    |
+| fd 1    |    |
++---------+    |
+| fd 2    |    |
++---------+    |
+| fd 3    |----+
++---------+ 
+```
+
+## 10.9 I/O Redirection
+
+Associate std i/o with disk files.
+
+```c
+#include <unistd.h>
+int dup2(int oldfd, int newfd);
+```
+
+After dup, if `refcnt==0`, then open file table entry & v-node table entry would be deleted.
+
+```
+dup2(3, 0)
+
+Descriptor        Open file            v-node
+Table             Table                Table
++---------+       +-------------+       +-------------+
+| fd 0    |---+   | File A      |------>| File Access |
++---------+   |   | File pos    |       | File Size   |
+| fd 1    |   |   | refcnt=0    |       | File Type   |
++---------+   |   +-------------+       +-------------+
+| fd 2    |   |   
++---------+   |   +-------------+       +-------------+
+| fd 3    |---+-->| File B      |------>| File Access |
++---------+       | File pos    |       | File Size   |
+                  | refcnt=2    |       | File Type   |
+                  +-------------+       +-------------+
+```
+
+## 10.10 Standard I/O
+
+```c
+#include <stdio.h>
+extern FILE *stdin;     /* Standard input (descriptor 0) */
+extern FILE *stdout;    /* Standard output (descriptor 1) */
+extern FILE *stderr;    /* Standard error (descriptor 2) */
+```
+
+stdio models open file as stream: a pointer to a structure of `FILE`, an abstraction for a file descriptor and a stream buffer, to minimize the number of expensive I/O system calls/ 
