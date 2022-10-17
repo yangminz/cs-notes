@@ -259,6 +259,21 @@ After executing an instruction, before executing the next instruction, CPU check
 
 # Chapter 8. Memory Management
 
+## 8.1 Page Frame Management
+
+### Memory Zones
+
+HW constraints: 
+
+1.  DMA processors for old ISA can only address first 16MB of RAM
+2.  32-bit with multiple RAM, CPU cannot directly access all physical memory because the linear address space is too small (2^32 < RAM size)
+
+Linux 2.6 partitions physical memory of each memory node into 3 zones: UMA:
+
+-   `ZONE_DMA`: frames below 16MB
+-   `ZONE_NORMAL`: frames above 16MB below 896MB
+-   `ZONE_HIGHMEM`: frames above 896MB 
+
 ## 8.3 Noncontiguous Memory Area Management
 
 ### Allocating a Noncontiguous Memory Area
