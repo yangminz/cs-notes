@@ -438,12 +438,139 @@ Device Driver [SCSI, ATA, etc]
 
 # Chapter 39. Interlude: Files and Directories
 
+2 key operating system abstractions: **process, address space**, now add one new: **persistent storage**, can be classic hard disk drive, or modern solid-state storage device.
 
+## 39.1 Files And Directories
 
+File: a linear array of bytes. Historically, internal file name is **inode number**. Each file has one inode number.
 
+File System (FS) responsibility: store data persistently on disk. 
 
+Directory: also have inode number. A list of entries (either file, directory). *Directory Tree/Directory Hierarchy*.
 
+Root directory (in Unix: `/`). 
 
+File name: arbitrary name + file type. Just a convention, no enforcement.
 
+FS: a way to name all files: directory + file name.
 
+## 39.3 Creating Files
+
+`open` system call, passing filename, flag, mode.
+
+Returns **file descriptor**: an integer private per process, used in system to access files. It's (1)an opaque handle to perform file operations; (2)a pointer to an object of type file.
+
+Process maintains the array of file descriptors. 
+
+## 39.4 Reading And Writing Files
+
+`strace` to see how does `cat` open files. `strace` tool can see what programs are up to. Trace system calls the program makes, see arguments & return codes. `strace -f`, see fored children; `strace -t` reports time of call; `strace -e trace=open,close,read,write` to focus.
+
+```shell
+strace cat x.txt
+```
+
+Each process already has three files open: `stdin`, `stdout`, `stderr`. So fd >= 3.
+
+## 39.5 Reading And Writing, But Not Sequentially
+
+If have index on file content, may read from offset. To do so, use `lseek()` system call:
+
+```c
+#include <sys/types.h>
+#include <unistd.h>
+
+off_t lseek(int fd, off_t offset, int whence);
+```
+
+`lseek()` repositions the file offset of the open file description associated with the file descriptor `fd` to the argument `offset` according to the directive `whence`.
+
+| `whence`   | Description                                                       |
+|------------|-------------------------------------------------------------------|
+| `SEEK_SET` | The file offset is set to offset bytes.                           |
+| `SEEK_CUR` | The file offset is set to its current location plus offset bytes. |
+| `SEEK_END` | The file offset is set to the size of the file plus offset bytes. |
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+int main()
+{
+    // file: x.txt: 1111111122222222
+    char buf[8];
+    int fd = open("./x.txt", O_RDONLY, S_IRUSR);
+    lseek(fd, 8, SEEK_SET);
+    read(fd, &buf, 8);
+    close(fd);
+    // strace -e trace=open,read,write,close ./a
+}
+```
+
+`buf` content: `22222222`.
+
+`read()/write()` will implicitly update current file offset, `lseek()` will explicitly, in memory (`struct file {...}`), NOT IN DISK!
+
+All opened files are managed by system as **Open File Table**, each entry will have one lock.
+
+Example: open same file twice and read.
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+int main()
+{
+    // file: x.txt: 1111111122222222
+    char buf1[8];
+    char buf2[8];
+    int fd1 = open("./x.txt", O_RDONLY, S_IRUSR);
+    int fd2 = open("./x.txt", O_RDONLY, S_IRUSR);
+    read(fd1, &buf1, 8);
+    read(fd2, &buf2, 8);
+    close(fd1);
+    close(fd2);
+    // strace -e trace=open,read,write,close ./a
+}
+```
+
+This will create 2 independent open file table entries, each has one lock and one offset. So `buf1` and `buf2` are all `11111111`.
+
+## 39.6 Shared File Table Entries: `fork()` And `dup()`
+
+Table entry in open file table can be shared: `fork()` and `dup()`.
+
+Child process shares the same open file table entry with parent:
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/wait.h>
+int main()
+{
+    char buf[8];
+    int fd = open("./x.txt", O_RDONLY, S_IRUSR);
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        // child
+        lseek(fd, 8, SEEK_SET);
+    }
+    else
+    {
+        // parent
+        int status;
+        waitpid(pid, &status, 0);
+        read(fd, &buf, 8);
+        close(fd);
+    }
+    // strace -e trace=open,read,write,close ./a
+}
+```
+
+So `buf` will receive `22222222` from the offset set by child.
 
