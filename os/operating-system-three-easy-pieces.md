@@ -574,3 +574,287 @@ int main()
 
 So `buf` will receive `22222222` from the offset set by child.
 
+**Reference count**: when a open file table entry is shared, `refcnt+=1`. If `refcnt==0`, remove entry.
+
+`dup()` call create new fd refers to the same open file entry as an existing fd. Useful for shell to do I/O redirection.
+
+## 39.7 Writing Immediately With `fsync()`
+
+`write()`: FS will write data to persistent storage at some point in future: not immediately.
+
+FS will buffer write in memory for delay for perf reasons. Write may crash before write to disk and lost data.
+
+But for DBMS (database management system), recovery protocol needs to force write immediately. Use `fsync` to force dirty data to disk.
+
+```c
+#include <unistd.h>
+int fsync(int fd);
+```
+
+> `fsync()`  transfers ("flushes") all modified **in-core** data of (i.e., modified buffer cache **pages** for) the file referred to by the file descriptor `fd` to the disk device (or other permanent storage device) so that all changed information can be retrieved even if the system crashes or is rebooted. This includes **writing through** or **flushing a disk cache if present**.  The call blocks until the device reports that the transfer has completed.
+
+Usage: not only flush the file, but also flush the directory. This is important if newly created.
+
+## 39.8 Renaming Files
+
+`mv` command and `rename()` system call. Usually atomic so if system crash, the file is either old name or new name, no in-between state. Example, add new content in file:
+
+```
+int fd = open("x.txt.tmp", O_WRONLY|O_CREATE|O_TRUNC, S_IRUSR|S_IWUSR);
+write(fd, buffer, size);
+fsync(fd);
+close(fd);
+rename("x.txt.tmp", "x.txt");
+```
+
+`rename` will atomically swaps new file into place & concurrently deleting old file, so we have atomic file update.
+
+## 39.9 Getting Information About Files
+
+`stat()/fstat()` to get file metadata. FS usually keeps metadata in `inode`, persistent data structure kept by FS.
+
+## 39.10 Removing Files
+
+`rm`, actually calls system call `unlink()`. It's related with files & directories.
+
+## 39.11 Making Directories
+
+Directory is considered as FS metadata, so can create, read, delete but cannot write.
+
+`mkdir()` to create directory. On just created, directory is empty with only 2 links: `.` & `..`.
+
+## 39.12 Reading Directories
+
+`ls` calls: `opendir(), readdir(), closedir()` system calls.
+
+## 39.13 Deleting Directories
+
+`rmdir()`, dangerous so directory must be empty.
+
+## 39.14 Hard Links
+
+`link()` system call to create an entry in file system tree. `ln`:
+
+```shell
+echo "hello world!" > foo
+ln foo bar
+cat bar
+# hello world!
+ls -i foo bar
+#23643898043799116 bar
+#23643898043799116 foo
+```
+
+`link()` creates another name in directory and refers it to the same inode number of the old file. 
+
+When create file, actually do 2 things:
+
+1.  Create a inode to track metadata of the file: file size, location on disk, etc.
+2.  Link a human-readable file name to the file, put the link into a directory.
+
+inode also has **reference count** or **link count**. It's only deleted when counted as zero.
+
+-   No hard link to directory in case there were loop in directory tree.
+-   No hard link to other disk partitions: inode numbers are unique within one FS.
+
+## 39.15 Symbolic Links
+
+**Symbolic link** or **soft link**. `ln -s`.
+
+Soft link is actually itself a file, of different types. 
+
+```
+$ echo "hello world!" > foo
+$ ln -s foo bar
+$ stat foo bar
+  File: foo
+  Size: 13              Blocks: 0          IO Block: 4096   regular file
+Device: 2h/2d   Inode: 24769797950587651  Links: 1
+Access: (0644/-rw-r--r--)  Uid: ( 1000/yangminz)   Gid: ( 1000/yangminz)
+Access: 2022-10-18 11:52:48.264809700 +0800
+Modify: 2022-10-18 11:52:48.264809700 +0800
+Change: 2022-10-18 11:52:48.264809700 +0800
+ Birth: -
+
+  File: bar -> foo
+  Size: 3               Blocks: 0          IO Block: 4096   symbolic link
+Device: 2h/2d   Inode: 6755399441171766  Links: 1
+Access: (0777/lrwxrwxrwx)  Uid: ( 1000/yangminz)   Gid: ( 1000/yangminz)
+Access: 2022-10-18 11:52:53.154569900 +0800
+Modify: 2022-10-18 11:52:53.154569900 +0800
+Change: 2022-10-18 11:52:53.154569900 +0800
+ Birth: -
+```
+
+Unlike hard link reference count, when foo is removed, bar just loses the link.
+
+## 39.17 Making And Mounting A File System
+
+To build up full directory tree from FS:
+
+1.  make FS: `mkfs` to make FS. It will write an empty file system, e.g., `EXT3`, onto the disk partition.
+2.  mount FS to make contents accessible: mount the created FS to uniform FS tree viwa `mount` program and `mount()` call. Take the existing directory as **mount point** and paste the new FS onto the directory tree.
+
+E.g., an unmounted `EXT3` FS in device partition `/dev/sda1`: a root directory contains `a, b` sub-directories. Now mount this FS to `/home/users`:
+
+```
+mount -t ext3 /dev/sda1 /home/users
+```
+
+Then there will be `/home/users/a` and `home/users/b`.
+
+# Chapter 40. File System Implementation
+
+How to build a simple FS; The data structures needed on the disk; What to track; How accessed.
+
+## 40.1 The Way To Think
+
+-   **Data structure of FS**: e.g., arrays of blocks, tree-based structures.
+-   **Access methods**: i.e., `open(), read(), write()`, map the function calls onto data structures.
+
+## 40.2 Overall Organization
+
+First, divide disk into blocks, e.g., 4KB. E.g., have a very small disk: 64 blocks.
+
+| Indices | Description                                                                  |
+|---------|------------------------------------------------------------------------------|
+| 0       | super block, info about FS, e.g., number of inodes & data blocks, FS type    |
+| 1-2     | allocation structures to track if inodes/data blocks are freed or allocated. |
+| 3-7     | inode table to index the files in data region.                               |
+| 8-63    | Data region.                                                                 |
+
+Can use most allocation-tracking methods, e.g., free list, bitmap array for data region and inode table.
+
+## 40.3 File Organization: The Inode
+
+inode: **Index node**. Given index number, should directly calculate the location on disk:
+
+```
+                                    | iblock 0  | iblock 1  | iblock 2  | iblock 3  | iblock 4  |
++-----------+-----------+-----------+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|           |           |           | 0| 1| 2| 3|16|17|18|19|32|33|34|35|48|49|50|51|64|65|66|67|
+|           |           |           |--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+|           |           |           | 4| 5| 6| 7|20|21|22|23|36|37|38|39|52|53|54|55|68|69|70|71|
+| super     | i-bitmap  | d-bitmap  |--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+|           |           |           | 8| 9|10|11|24|25|26|27|40|41|42|43|56|57|58|59|72|73|74|75|
+|           |           |           |--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+|           |           |           |12|13|14|15|28|29|30|31|44|45|46|47|60|61|62|63|76|77|78|79|
++-----------+-----------+-----------+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+0KB         4KB         8KB         12KB        16KB        20KB        24KB        28KB        32KB
+```
+
+Convert the inode offset bytes into disk sector and find the inode data content.
+
+Most important thing of inode design: metadata, e.g., type, time, etc., and **how indexing into data region**. Simple way: record disk address in data region, one pointer to one block contained in file. But have file size limit.
+
+### The Multi-Level Index
+
+Use multi-level pointers, inode points to set of more pointers. Inode can have 12 direct pointers + 1 indirect pointer. If file size > 12 * 4KB, use indirect pointer.
+
+Or use extents: a disk pointer + length (in blocks). Need to consider contiguous space. 
+
+| Pointer-Based           | Extent-Based  |
+|-------------------------|---------------|
+| Flexible                | Less flexible |
+| Large metadata per file | More compact  |
+
+Besides, there is linked-list based approach. Poor perf for random access. Old FS **FAT** used in old Windows.
+
+FS measurement summary to guide design:
+
+| Most files are small                 | ˜2K is the most common size                       |
+|--------------------------------------|---------------------------------------------------|
+| Average file size is growing         | Almost 200K is the average                        |
+| Most bytes are stored in large files | A few big files use most of space                 |
+| File systems contains lots of files  | Almost 100K on average                            |
+| File systems are roughly half full   | Even as disks grow, file systems remain ˜50% full |
+| Directories are typically small      | Many have few entries; most have 20 or fewer      |
+
+## 40.4 Directory Organization
+
+Directory is a simple list. It's a simple name -> inode number mapping. Each entry: inode number, record length, string length, name of the entry:
+
+| inum | reclen | strlen | name                          |
+|------|--------|--------|-------------------------------|
+| 5    | 12     | 2      | `.`                           |
+| 2    | 12     | 3      | `..`                          |
+| 12   | 12     | 4      | `foo`                         |
+| 13   | 12     | 4      | `bar`                         |
+| 24   | 36     | 28     | `foobar_is_a_pretty_longname` |
+
+Delete file can leave hole in the directory. New entry may reuse the hole.
+
+Directory is a special file: it has inode, index into data region.
+
+## 40.5 Free Space Management
+
+FS needs to track which inodes & data blocks are free by **Free Space Management**: bitmap, free lists, B-tree, etc.
+
+When create a file, need to allocate an inode. FS search through the bitmap for free inode, allocate it to the file, mark the inode as used, eventually update the on-disk bitmap.
+
+## 40.6 Access Paths: Reading and Writing
+
+Assume that: FS mounted, superblock in memory, everything else (inodes, directories) is still on the disk.
+
+### Reading A File From Disk
+
+Open 12KB file (3 blocks), read, close. 
+
+1.  Open. FS needs to find the inode by full pathname. 
+    1.  The **root directory `/`** inode number is *well known*: `2`. When get the root inode, FS uses the on-disk pointers to read directory and looking for file (inode number).
+    2.  DFS go down and match to target file.
+    3.  Load on-disk target file inode into memory, do permission check, allocate file descriptor.
+2.  Read. Read in the first block of file, check with inode and find its disk address. Update the in-memory open file table.
+3.  Close. Free the file descriptor.
+
+The timeline to read file `foo/bar`:
+
+`open(foo/bar)`:
+
+1.  read root inode;
+2.  read root directory data block
+3.  read `foo` directory inode
+4.  read `foo` directory data block
+5.  read `bar` file inode
+6.  read `bar` file data block
+
+I/O time to open file is proportional to pathname length.
+
+`read()`:
+
+7.  read `bar` file inode
+8.  read `bar` data block `[0]`
+9.  write `bar` file inode to update last access time
+10. update in-memory current file offset
+11. read `bar` file inode
+12. read `bar` data block `[1]`
+13. write `bar` file inode to update
+14. update in-memory current file offset
+
+### Writing A File To Disk
+
+Open the file is the same as above. But write to file may need allocate free data block. So also need to update bitmap to track allocation:
+
+`write()` call:
+
+1.  read `bar` file inode
+2.  read `bar` allocation bit in data bitmap (free or overwrite)
+3.  write allocated to `bar` allocation bit in data bitmap
+4.  write data to `bar` data block `[i]`
+5.  write `bar` file inode for last update time
+6.  update in-memory open file table entry
+
+## 40.7 Caching and Buffering
+
+Need to aggressively use DRAM to cache important blocks to reduce I/O time.
+
+LRU fixed-size cache (**Static partitioning**) to hold popular blocks. It's around 10% of total memory and allocated at boot time.
+
+**Dynamic partitioning**: integrate virtual memory pages & file system pages into same cache: *unified page cache*. 
+
+OS will buffer writes in memory for 5-30 seconds. But need to consider system crash. This is the **Durability/Performance Trade-Off**. Choose the strategy based on application requirements. If cannot tolerate data lost, e.g., DBMS, use `fsync()`.
+
+
+
+
+
