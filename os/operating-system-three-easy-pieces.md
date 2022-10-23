@@ -854,6 +854,134 @@ LRU fixed-size cache (**Static partitioning**) to hold popular blocks. It's arou
 
 OS will buffer writes in memory for 5-30 seconds. But need to consider system crash. This is the **Durability/Performance Trade-Off**. Choose the strategy based on application requirements. If cannot tolerate data lost, e.g., DBMS, use `fsync()`.
 
+# Chapter 41. Locality and The Fast File System
+
+Old UNIX file system, really simple, a first step:
+
+```
++---+--------+--------------+
+| S | Inodes | Data         |
++---+--------+--------------+
+```
+
+-   Superblock: metadata about the entire FS: volume size, number of inodes, pointer to free block list head, etc.
+-   inodes: all inodes
+-   data: files.
+
+## 41.1 The Problem: Poor Performance
+
+Problem: OUFS treated disk like RAM; data spread over the place without the fact of disk. Need to expensive seek.
+
+Worse: **Fragmented**: free space was not carefully managed: Logically contiguous file is distributed across the disk. Example, file `A,B,C,D` over 8 blocks (each file 2 blocks): `A1,A2,B1,B2,C1,C2,D1,D2`. Delete `B,D`: `A1,A2,_,_,C1,C2,_,_`. Allocate file `E` with 4 blocks: `A1,A2,E1,E2,C1,C2,E3,E4`.
+
+**Internal Fragmentation**: Small block can minimize internal fragmentation, but bad for transfer.
+
+## 41.2 FFS: Disk Awareness Is The Solution
+
+Berkeley built a better faster FS, *Fast File System (FFS)*. FFS is **Disk aware**.
+
+## 41.3 Organizing Structure: The Cylinder Group
+
+FFS divide disk into **cylinder groups**. One cylinder is a set of tracks on different surfaces of a hard drive that are the same distance from the center:
+
+```
+height  [m]:  circle[m][0], circle[m][1], ... circle[m][n]
+...
+height  [1]:  circle[1][0], circle[1][1], ... circle[1][n]
+height  [0]:  circle[0][0], circle[0][1], ... circle[0][n]
+```
+
+Then a cylinder group is:
+
+```
+cylinder group{i} = { circle[0][i], circle[1][i], ... circle[m][i] }
+```
+
+The group is like a geometric cylinder. Then the whole disk is a set of cylinder groups:
+
+```
+disk = { CG[0], CG[1], ..., CG[n] }
+```
+
+Modern drives do not provide hardware details but a logical address space of blocks. Thus modern FS (ext2,3,4) organize the drive into **block groups**, e.g., every 8 blocks a group.
+
+Cylinder groups or block groups, inner-group seeking is faster than cross-group seeking. FFS keeps each group like a small FS: superblock, inodes, data.
+
+## 41.4 Policies: How To Allocate Files and Directories
+
+Basic mantra: keep related stuff together & keep unrelated stuff far apart. Related stuff are placed in the same block group, unrelated stuff placed in different groups.
+
+For directory, it can be placed evenly across the groups. For a new dir to be placed, find a group that: 1) has low number of dirs; 2) has large number of free inodes. Insert the dir into this group. Can use other strategies.
+
+For files, 1) allocate the file in the group with its inode; 2) files in same dir are together in the group of dir.
+
+Example, each group has 10 inodes, 10 blocks, one directory uses 1 data block, one file uses 2 data blocks. 3 roots: `/,/a,/b`, 4 files: `/a/x, /a/y, /a/z, /b/u`. Then:
+
+```
+grp | inodes     | data blocks
+0   | /--------- | /---------
+1   | axyz------ | axxyyzz---
+2   | bu-------- | buu-------
+```
+
+Bad case to allocate sequentially: (if we have 8 groups)
+
+```
+grp | inodes     | data blocks
+0   | /--------- | /---------
+1   | a--------- | a---------
+2   | b--------- | b---------
+3   | x--------- | xx--------
+4   | y--------- | yy--------
+5   | z--------- | zz--------
+6   | u--------- | uu--------
+7   | ---------- | ----------
+```
+
+## 41.5 Measuring File Locality
+
+Statistics show that locality of file/dir access. Another pattern is: 
+
+```
+/proj
+    /src
+        foo.c
+    /obj
+        foo.o
+```
+
+## 41.6 The Large-File Exception
+
+For large file, one entire group may not be enough. It's not good and may hurt file-access locality. 
+
+Divide the large file into chunks to fit into multiple groups. This will add cross-group seeking and hurt perf. But it can be mitigated by choosing chunk size carefully. If chunk size is large, the **amortized** seeking time is smaller.
+
+The number of chunks: $\frac{LargeFileSize}{ChunkSize}$
+
+The average positioning time (seek & rotate) for one group: $T_{pos}$
+
+The disk transfer speed: $v_{trans}$
+
+Then the total time is:
+
+$$T_{total} = \frac{LargeFileSize}{ChunkSize} \cdot ( \frac{ChunkSize}{v_{trans}} + T_{pos} )$$
+
+So the ratio of positioning is:
+
+$$r = \frac{\frac{LargeFileSize}{ChunkSize} \cdot T_{pos}}{T_{total}} = \frac{T_{pos}}{\frac{ChunkSize}{v_{trans}} + T_{pos}} = \frac{T_{pos} \cdot v_{trans}}{ChunkSize + T_{pos} \cdot v_{trans}}$$
+
+One fact is: it's easy to improve $v_{trans}$ but difficult to improve $T_{pos}$.
+
+## 41.7 A Few Other Things About FFS
+
+Small file concern: most files are only 2KB in size, but use 4KB block. So the internal fragmentation is high.
+
+FFS uses sub-blocks (512B). Allocate 512B first until 4KB and copy all 512B sub-blocks into one whole block. Not efficient enough. So should avoid this behavior: `libc` should buffer write in 4KB chunks to FS and avoid sub-block in most cases. 
+
+Disk layout: old: `0,1,2,3,4,5,6,7,8,9,10,11` in circle, read `0,1`. Read `0` first and then `1`, but it's too late after reading `0` and transfer, the head will invoke a full rotation. So use better layout by skipping: `0,6,1,7,2,8,3,9,4,10,5,11` in circle. Read `0`, when read is complete, head goes over `6`, now request next block read for `1`. This is **parameterization**.
+
+
+
 
 
 
