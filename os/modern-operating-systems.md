@@ -251,7 +251,229 @@ So most CPU save the information on stack. Not user stack, but kernel stack. But
 
 Old architecture, CPU checks pending interrupts after each instruction execution. But how about pipelined & superscalar parallel CPUs? 
 
+# Chapter 4. File Systems
 
+Magetic disks/Solid-state drives: a linear sequence of fixed-size blocks supporting locating, reading, writing.
+
+## 4.3 FILE-SYSTEM IMPLEMENTATION
+
+-   How files & dirs are stored
+-   How disk space managed
+-   How to make everything work efficiently & reliably
+
+### 4.3.1 File-System Layout
+
+FS stored on disks: Disk can be divided into **partitions**: each partition has own FS. **Sector 0**: **MBR (Master Boot Record)** to boot the computer. The end of MBR: *partition table*.
+
+Partition table records begin & end of each partition. When PC booted, BIOS reads in & exec MBR. MBR will locate the *Active Partition* (one partition marked as active), read in first block (**Boot Block**) & execute. OS is loaded from this partition.
+
+```
+          MBR
++--------------------+-----------+-----------+-----------+
+|          |Partition| Partitions| Active    | Partitions|
+|          |Table    |           | Partition |           |
++--------------------+-----------+-----------+-----------+
+```
+
+Actually each partition has the following structure for uniformity, whether it has OS or not:
+
+```
++-----------+-----------+-----------+-----------+-----------+--------------+
+| Boot      | Super     |Free Space | I-nodes   | Root Dir  | Data Blocks: |
+| Block     | Block     |Mgmt       |           |           | Files & Dirs |
++-----------+-----------+-----------+-----------+-----------+--------------+
+```
+
+-   Boot Block: If partition does not have OS, it's empty. If has OS, execute to load OS.
+-   Super Block: all key parameters about FS, e.g., FS type, number of blocks, etc.
+-   Free Space Mgmt: A bitmap or list of pointers of free blocks
+-   I-nodes: one per file tell about the file metadata.
+-   Root dir: top of the FS. `/`
+-   Data blocks: the files & dirs.
+
+### 4.3.2 Implementing Files
+
+Most important issue: keep track of which disk blocks go with which file.
+
+#### Contiguous Allocation
+
+Each file is a set of contiguous disk blocks. E.g., Block size 1KB, 50KB file will use 50 consecutve blocks. May have internal fragmentations if 512B file, will not use the left 512B space.
+
+Pros:
+
+1.  Simple to impl: starting disk address & number of blocks.
+2.  Read is good perf: in sequence. No more disk seek & rotation.
+
+Cons: Fragmentation is severe. Will eventually to compact the disk, stop the world and expensive.
+
+It's good for CD-ROMs, DVDs, Blu-rays, and other write-once media.
+
+#### Linked-List Allocation
+
+```
++-----+    +-----+    +-----+    +-----+    +-----+
+|  ------->|  ------->|  ------->|  ------->|     |
++-----+    +-----+    +-----+    +-----+    +-----+
+|File |    |File |    |File |    |File |    |File |
+|Block|    |Block|    |Block|    |Block|    |Block|
+|[0]  |    |[1]  |    |[2]  |    |[3]  |    |[4]  |
++-----+    +-----+    +-----+    +-----+    +-----+
+
+Physical   Physical   Physical   Physical   Physical
+Block 4    Block 7    Block 2    Block 10   Block 12
+```
+
+First word of the block is a pointer to the next block. If shuffle the blocks, access is very slow due to re-seek.
+
+#### Linked-List Allocation Using a Table in Memory
+
+Use a **FAT (File-Allocation Table)** in memory to record the pointers. So the search is done in memory instead of on disk. Sort and access in sequence.
+
+So not scale well to large disks. MS-DOS & all windows use this FS.
+
+But really consumes memory.
+
+#### I-nodes
+
+Use **i-node (index-node)** to keep track of each file meta data and find all blocks of the file.
+
+```
++------------------------------+
+| File Metadata                |
++------------------------------+
+| Address of disk block 0      |
++------------------------------+
+| Address of disk block 1      |
++------------------------------+
+| Address of disk block 2      |
++------------------------------+
+| Address of disk block 3      |
++------------------------------+
+| Address of disk block 4      |
++------------------------------+
+| Address of disk block 5      |
++------------------------------+
+| Address of disk block 6      |
++------------------------------+
+| Address of disk block 7      |
++------------------------------+
+| Address of block of pointers |
++------------------------------+
+```
+
+It can save space. Use multi-level pointers to save more pointers.
+
+### 4.3.3 Implementing Directories
+
+Dir sys: map ASCII name of file onto info to locate file.
+
+How to store: 
+
+Solution 1: simple way: dir have array of fixed size entries to map. So the file name must be limited, less than entry size.
+
+Solution 2: fixed-length header (owner, time, protection, etc.) + file name. E.g.,
+
+```c
+typedef struct
+{
+    uint32_t        filesize;
+    file_metadata_t metadata;
+    char            filename_firstchar;
+    // the following chars all belong to filename
+    // read: (char*)(&entry_p->filename_firstchar)
+} dir_entry_t
+```
+
+But when file is removed, there is a variable-sized gap. Only way is compacting the directory (feasible since it's in-memory). Another problem: directory entry can be huge (more than one page), so may have page fault.
+
+Solution 3: ELF way: fixed-size entry + pointer to variable names, like string table in ELF file. Still need to manage heap of strings since may delete (which is different from ELF string table, that's read only).
+
+The above solutions use linear search. Improve: hash table/trie. If use hash table, cache the search result for faster searching.
+
+### 4.3.4 Shared Files
+
+Files can be in different dirs for different users to share. Thus FS hierarchy is DAG (directed acyclic graph) instead of a tree.
+
+Symbolic link: Only true owner has the pointer to i-node. Other users just have path names (**Link-Type File**), OS sees the requested file type is LINK and thus search the FS to get the i-node. When true owner deletes the file, symbolic link will fail. It brings multiple disk accesses and add access to i-node of the Link file itself.
+
+Hard link: Add the i-node of the shared file to directories. And do reference count in i-node. But owner of i-node and actual referencer may mismatch: `foo=(Owner=/A,Count=1</A>)`, add hard link of `/B`: `foo=(Owner=/A,Count=2</A,/B>)`, `/A` deletes the file `/A/foo`: `foo=(Owner=/A,Count=1</B>)`, mismatch in this case. `/A` may be counted as owning the file.
+
+### 4.3.5 Log-Structured File Systems
+
+Disk seek time is very hard to reduce even CPU much more faster, the bottleneck. Berkeley desigend **LFS (Log-structured File System)** to try to alleviate.
+
+Consistency vs Performance: cache writes and do batch writing will help perf, but if system crash then no consistency. So i-node writes are generally done immediately.
+
+Idea: do FS cache without disk access. Observation: most disk activities will be **small writes**, so prefetch-block for read will not help perf.
+
+LFS: structure the entire disk as big log to achieve full bandwidth of disk, even a workload of so many small random writes. OS collects all pending writes in memory into a single segment, append to the end of the disk log. A segment contains: i-nodes, dir blocks, data blocks, all in one. If average size of segment is about 1MB, then full bandwidth of disk can be utilized.
+
+Now much harder to find an i-node (location cannot be calculated by i-node number). So maintain an i-node to disk address map, the map is on disk, also cached in memory.
+
+> all writes are initially buffered in memory, and periodically all the buffered writes are written to the disk in a single segment, at the end of the log.
+
+Real world: disk size is limited, so need to overwrite the old log entries, e.g., the old data blocks. LFS need one cleaner thread to do scanning & compacting.
+
+### 4.3.6 Journaling File Systems
+
+Use the basic idea of LFS: keep track of what FS is going to do before do it, so operations can be recovered from crash. **Journaling File System**.
+
+Consider removing file problem: In UNIX, 3 steps:
+
+1.  Remove file from directory
+2.  Release i-node to the pool of free i-nodes
+3.  Return data blocks to the pool of free data blocks
+
+System can crash anytime. If step 1 happened, system crashed, then we lose the reference to i-node, it's unreachable. And it happens on disk, so rebooting will not help at all. If do step 2 or step 3 first, and then system crash, still have severe problem.
+
+JFS firstly writes a log entry listing the 3 actions to be done. Only when the log is written on disk, then do the operations. When done, remove the log.
+
+The logged operations must be **idempotent**: can be repeated as often as necessary without harm (Like RESTful API). "Add block n to free list" is not idempotent, "Search free block list and add block n to it if it's not there" is.
+
+JFS can also use **atomic transaction**, a group of actions between `BEGIN TRANSACTION` & `END TRANSACTION`: FS must complete the transaction or not at all (like DBMS). 
+
+### 4.3.7 Virtual File Systems
+
+Windows: `C:`, `D:`, can be different FS. UNIX: all in one: `/` can be ext2, `/usr` can be ext3 partition. This is done by **VFS (Virtual FS)**. Idea: abstraction of FS interface. The user program will only use POSIX standard calls: `open`, `read`, `write`, `lseek`, etc.
+
+Original motivation: support network file: user program do not know the data is local or remote.
+
+Timeline:
+
+1.  System boot, root file system is registered with VFS.
+2.  Boot time or lazily, other FSs register with VFS: FS provides the function addresses of `open`, `read`, `write`, `lseek`, etc. So VFS knows how to r/w block through underlying FS.
+3.  User program call VFS functions through POSIX: `open("/usr/include/unistd.h", O_RDONLY);`
+    1.  VFS locates FS superblock of `/usr` of all registered FSs
+    2.  VFS creates a **v-node** (in RAM) and call the underlying FS to get i-node.
+4. VFS makes an entry in file-descriptor table for calling process and points to new v-node.
+5. VFS return the file-descriptor back to user process.
+
+When user process tries to read:
+
+1.  VFS locate the v-node through file descriptor table
+2.  VFS call the underlying FS's `read` and get the data block.
+
+## 4.4 FILE-SYSTEM MANAGEMENT AND OPTIMIZATION
+
+### 4.4.1 Disk-Space Management
+
+2 general strategies for storing n-byte file: 1) allocate consecutive space on disk; 2) split the file into blocks. Same trade-off in segmentation vs paging in memory management. Nearly all FS split the file into blocks so file can grows larger.
+
+#### Block Size
+
+Disk view: sector, track, cylinder, unit of allocation, all device dependent. In paging system, page size.
+
+If block is too large, waste space for small files; if too small, waste time in seeking next blocks. So we need to study the file-size distribution. FS often use 1KB to 4KB range, but disk is cheap, we can use 64KB and accept the wasted disk space.
+
+#### Keeping Track of Free Blocks
+
+2 widely used methods: 1) Linked list of free blocks. Free blocks will hold the list, so the storage is free. Bad when disk is severely fragmented; 2) bitmap: n blocks will make a n-bit bitmap.
+
+Linked list problem: when block of pointers is almost empty, short-lived temporary files can cause a lot of disk I/O. So split the full block of pointers. Keep most of the pointer blocks on disk full to minimize disk usage, but keep the one in memory about half full to handle file creation and removal on the free list.
+
+> This issue illustrates a problem operating system designers often have. There are multiple data structures and algorithms that can be used to solve a problem, but choosing the best one requires data that the designers do not have and will not have until the system is deployed and heavily used. And even then, the data may not be available.
+
+#### Disk Quotas
 
 
 
