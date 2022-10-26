@@ -475,8 +475,52 @@ Linked list problem: when block of pointers is almost empty, short-lived tempora
 
 #### Disk Quotas
 
+Multiuser OS: enforcing disk quotas. Open file table in main memory has a *owner* attribute, file size will be counted to the owner.
 
+A quota table to record per user.
 
+### 4.4.2 File-System Backups
+
+FS cannot protect against physical destruction. It can only do backups.
+
+**Incremental dumps**: A complete dump weekly/monthly, daily dump for files only changed since last dump.
+
+Dump is taking time, make rapid snapshots of FS state by copying critical data structures. Future changes to files & dirs will copy the blocks instead of updating them in place.
+
+2 strategies:
+
+-   **Physical dump**: copy from block 0 to the last. Useless to backup unused blocks. But accessing free block data structure need writing. Bad blocks (physically) usually invisualable to OS. Pros: simple, fast; Cons: cannot skip dirs, cannot make incremental dumps, cannot restore individual files. So the most make logical dumps.
+-   **Logical dump**: start from one specified dir and recursively dump down. 
+
+### 4.4.3 File-System Consistency
+
+System crashes before writing to disk, FS is in inconsistent state. Unix `fsck`, Windows `sfc` to check FS consistency. It will run whenever the system is booted. The consistency checks: Blocks & Files.
+
+Block consistency checker: Use 2 counters, one counter per block, initialized as `0`. Counter 1 checks the block belong to file: for each i-node, for each block, add 1; Counter 2 checks free blocks, for each free block, add 1. If consistent, then each block should not be shared, and it's allocated or free. So `cnt1 + cnt2 == 1`. If inconsistent:
+
+1.  `cnt1 + cnt2 == 0`: **missing block** -- an allocated block but not referenced by any file, no harm but waste space. Just add it back to free block pool.
+2.  `cnt1 == 1 && cnt2 > 1`: counted twice in free block pool. May happen in free block list, bitmap will not have this problem. Rebuild the free list.
+3.  `cnt1 > 1`: block is shared by files. Checker will allocate a new block and copy the payload to new-freed block.
+
+For dir, check file consistency in the same fashion, check in the unit of file (i-node).
+
+### 4.4.4 File-System Performance
+
+3 techs to improve perf:
+
+#### Caching
+
+Block cache or buffer cache. Check all read requests and see if the requested block is in cache in memory: Hash table + doubly linked list = LRU cache. But LRU may undesirable due to crash & consistency: i-node read into cache and updated but not written back to disk, then inconsistent. And i-node is not likely to be referenced twice shortly.
+
+So divide the blocks: i-node blocks, indirect blocks, data blocks, etc. Arrange their LRU order by access frequency. If block is critical to consistency, write back immediately.
+
+UNIX `sync` to force dirty blocks to be written to disk immediately. Windows: write-through cache, more disk I/O, every char written.
+
+Integrate buffer cache with page cache, good for memory-mapped files.
+
+#### Block Read Ahead
+
+Pre-fetch into cache to improve cache hit. Good for files being read sequentially, and not help for randomly accessed file. So each file can set a flag: *sequential-access mode* or *random-access mode*.
 
 # Chapter 10. Case Study 1: Unix, Linux, and Android
 
